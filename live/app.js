@@ -1071,7 +1071,16 @@
     const ci = state.cols.findIndex(c => colPath(c).includes(id));
     if (ci < 0) return;
     const path = colPath(state.cols[ci]);
-    $('.ai', t).replaceWith(answer(N(id), ci, path, path.indexOf(id)));
+    const old = $('.ai', t), fresh = answer(N(id), ci, path, path.indexOf(id));
+    const row = $(':scope > .working', old), next = $(':scope > .working', fresh);
+    if (!row || !next) { old.replaceWith(fresh); return; }
+    // Still being written: put the new text in and leave the row that holds
+    // "Stop" where it is. A browser sends no click for a button that left the
+    // page while the mouse was held down on it, so a row rebuilt with every
+    // piece of text could hardly be pressed.
+    [...old.children].forEach(c => { if (c !== row) c.remove(); });
+    [...fresh.children].forEach(c => { if (c !== next) old.insertBefore(c, row); });
+    $('span:not(.dots)', row).textContent = $('span:not(.dots)', next).textContent;
   }
 
   // ---------- actions ----------
@@ -1449,7 +1458,10 @@
       ai.append(el('div.working', { role: 'status' },
         el('span.dots', { 'aria-hidden': 'true' }, el('i'), el('i'), el('i')),
         el('span', {}, n.raw ? 'Writing…' : 'Thinking…'),
-        el('button.linkbtn', { on: { click: () => stop(n.id) } }, 'Stop')));
+        // Stops on the press as well as on the click: the row moves down as
+        // lines are added above it, and a button that has slid from under the
+        // pointer before the mouse is let go gets no click.
+        el('button.linkbtn', { on: { mousedown: ev => { if (ev.button === 0) stop(n.id); }, click: () => stop(n.id) } }, 'Stop')));
       return ai;
     }
 

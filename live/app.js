@@ -2094,7 +2094,9 @@
 
   document.addEventListener('keydown', ev => {
     if (ev.key === 'Escape') { closePop(); hideGloss(); closeModal(); document.body.classList.remove('side-open'); return; }
-    if (!ui.pending || /^(INPUT|TEXTAREA)$/.test(ev.target.tagName)) return;
+    // Not for a key that something else has already acted on: Enter on a box
+    // of a diagram opens the menu, and must not also choose from it.
+    if (!ui.pending || ev.defaultPrevented || /^(INPUT|TEXTAREA)$/.test(ev.target.tagName)) return;
     if (ev.key === 'Enter') { ev.preventDefault(); ask(ui.pending, '', false); }
   });
 

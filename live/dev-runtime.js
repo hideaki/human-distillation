@@ -36,7 +36,7 @@
       ].join('\n');
     }
 
-    const passage = /^About this (part|term|formula)/.test(q) || /^Still about the part/.test(q);
+    const passage = /^About (this (part|term|formula)|the symbol)/.test(q) || /^Still about the part/.test(q);
     if (/^Show what you just explained as a diagram/.test(q)) {
       return ['Here is the placeholder as a diagram.', '', '```graph', 'A -> B : leads to', 'B -> C', 'A <-> C : compared with', '```', '', '@@@', 'next: What does B do?'].join('\n');
     }

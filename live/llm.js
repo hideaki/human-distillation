@@ -29,6 +29,7 @@ const LLM = (() => {
   const askPrompt = (text, question) => `About this part of your answer:\n"${text}"\n\n${question}`;
   const partPrompt = (text, question) => `About this part of your diagram: "${text}"\n\n${question || 'Explain this part further: what it is, and how it relates to what it is connected to.'}`;
   const formulaPrompt = (text, question) => `About this formula in your answer: ${text}\n\n${question || 'Explain this formula: what each symbol stands for, and what the formula as a whole says, in plain words. Work through a small example with numbers if that helps.'}`;
+  const symbolPrompt = (sym, formula, question) => `About the symbol $${sym}$ in this formula from your answer: ${formula}\n\n${question || 'What does this symbol stand for here, and what does it do in the formula? Answer in a few plain sentences.'}`;
   const DRAW = 'Show what you just explained as a diagram, with a sentence or two around it.';
   const termPrompt = term => `About this term in your answer: "${term}"\n\nWhat does it mean here, and why does it matter for this topic?`;
   const followPrompt = (text, verb) => `Still about the part I pointed at ("${clip(text, 200)}"): ${VERBS[verb].ask}`;
@@ -85,7 +86,7 @@ const LLM = (() => {
       '- Keep it short enough to read in one go, usually two to four short paragraphs. They will ask for more where they need it, so do not try to cover everything.',
       '- One idea per sentence where you can. Any sentence may be pointed at on its own, so each should make sense when quoted alone.',
       '- Plain prose. Use a short list only for things that really are a list, and a code block only for code. No headings and no tables.',
-      '- Write every formula, equation and mathematical symbol in LaTeX, and the app typesets it. Inside a sentence put it between single dollar signs, like $p_i = \\frac{e^{z_i/T}}{\\sum_j e^{z_j/T}}$. Give a formula that matters a line of its own, between double dollar signs, with a blank line before and after. Never put a formula in backticks or a code block, and never write one in plain text. The person can click a formula to ask about it, so say what its symbols stand for in the text around it. Write a dollar sign that means money as \\$.',
+      '- Write every formula, equation and mathematical symbol in LaTeX, and the app typesets it. Inside a sentence put it between single dollar signs, like $p_i = \\frac{e^{z_i/T}}{\\sum_j e^{z_j/T}}$. Give a formula that matters a line of its own, between double dollar signs, with a blank line before and after. Never put a formula in backticks or a code block, and never write one in plain text. The person can click a formula, or a single symbol in it, to ask about it, so say what its symbols stand for in the text around it. Write a dollar sign that means money as \\$.',
       '- Use a diagram whenever the answer is about several things and how they relate: a process, a pipeline, a chain of causes, the parts of a system. Do this without being asked, and leave it out when prose alone is clear. Write it as a fenced block that opens with ```graph and holds one relation per line in the form "From -> To : label" (the label is optional, "--" draws a link with no arrow). Use short names of one to four words in plain text with no LaTeX, spell a thing the same way every time it appears, and keep to nine things or fewer. The app draws it, and the person can click any box or link to ask about it. Put it where it helps the text, at most one per answer, and still explain in prose.',
       '- When the question quotes a part of your earlier answer, answer about that part only, in a few sentences, without repeating the answer it came from.',
       '- If you are not sure of something, say so in the sentence where it matters.',
@@ -356,7 +357,7 @@ const LLM = (() => {
     SEP, VERBS, rt, ready,
     onChange(fn) { changed = fn; },
     ask, side, parse,
-    passagePrompt, askPrompt, partPrompt, formulaPrompt, termPrompt, followPrompt, DRAW,
+    passagePrompt, askPrompt, partPrompt, formulaPrompt, symbolPrompt, termPrompt, followPrompt, DRAW,
     errorText, isFinal: code => FINAL.has(code),
   };
 })();

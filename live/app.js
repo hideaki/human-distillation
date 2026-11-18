@@ -139,7 +139,7 @@
 
   function label(n) {
     if (!n.parent) return clip(n.q, 90);
-    if (n.anchor) return n.anchor.math || formulaOnly(n.anchor.text) ? clip(n.anchor.text, 46) : quote(n.anchor.text);
+    if (n.anchor) return n.anchor.sym ? '$' + n.anchor.sym + '$' : n.anchor.math || formulaOnly(n.anchor.text) ? clip(n.anchor.text, 46) : quote(n.anchor.text);
     return clip(n.q, 52);
   }
 
@@ -468,6 +468,10 @@
   const MATH_CSS = `
     :host { -webkit-user-select: none; user-select: none; }
     mjx-container { margin: 0 !important; }
+    rect.bg { fill: transparent; stroke: none; }
+    g.sym.hot > rect.bg, g.sym.pending > rect.bg, g.sym.open > rect.bg { fill: var(--hl-on); }
+    g.sym.queued > rect.bg { fill: var(--queued); stroke: var(--queued-line); stroke-width: 24; }
+    g.sym.resolved > rect.bg { stroke: var(--done-line); stroke-width: 30; }
     code { font: 0.84em/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
   `;
 
@@ -501,8 +505,10 @@
     if (math.cache.has(key)) return math.cache.get(key);
     let hit;
     try {
-      const node = MathJax.tex2svg(mode === 'inline-display' ? '\\displaystyle ' + tex : tex, { display: mode === 'block' });
-      hit = node.querySelector('[data-mjx-error]') ? { bad: true } : { node };
+      const src = mode === 'inline-display' ? '\\displaystyle ' + tex : tex;
+      const node = MathJax.tex2svg(src, { display: mode === 'block' });
+      hit = node.querySelector('[data-mjx-error]') ? { bad: true } : { node, syms: 0 };
+      if (hit.node) { try { hit.syms = markSyms(node, src, mode === 'block'); } catch (e) { hit.syms = 0; } }
     } catch (e) {
       math.tries[key] = (math.tries[key] || 0) + 1;
       if (e && e.retry && math.tries[key] < 4) {
@@ -526,6 +532,164 @@
     host.classList.toggle('raw', !drawn);
     root.textContent = '';
     root.append(el('style', {}, MATH_CSS + math.css), drawn ? hit.node.cloneNode(true) : el('code', {}, host._tex));
+    host._hit = drawn ? hit : null;
+    host._hot = null;
+    if (drawn && hit.syms) {
+      applyMarks(host);
+      if (!hit.boxed) { boxQueue.add(host); clearTimeout(boxT); boxT = setTimeout(boxSyms, 0); }
+    }
+  }
+
+  // ----- the symbols inside a formula -----
+  // MathJax's drawing has one <g> per node of the formula but does not say
+  // what LaTeX each came from. So the formula is also converted to MathML,
+  // the two trees are walked together, and each <g> that is a symbol (a name
+  // such as T, with any subscript, superscript or accent it carries) is
+  // tagged with LaTeX rebuilt from its MathML. Where the trees do not line
+  // up, that part of the formula simply has no symbols to click.
+
+  const SCRIPTED = new Set(['msub', 'msup', 'msubsup', 'munder', 'mover', 'munderover']);
+  const BIGOP = /^[∑∏∐∫∬∭∮⋃⋂⨁⨂⨀⋁⋀]$|^[A-Za-z]{2,}$/;
+  const FN = /^(exp|log|ln|lg|sin|cos|tan|cot|sec|csc|sinh|cosh|tanh|arcsin|arccos|arctan|max|min|sup|inf|lim|det|dim|ker|deg|gcd|arg|Pr|hom)$/;
+  const ACCENT = { '^': '\\hat', 'ˆ': '\\hat', '¯': '\\bar', '‾': '\\overline', '―': '\\overline', '~': '\\tilde', '˜': '\\tilde', '→': '\\vec', '⃗': '\\vec', '˙': '\\dot', '¨': '\\ddot', 'ˇ': '\\check', '˘': '\\breve' };
+  const VARIANT = { normal: '\\mathrm', bold: '\\mathbf', 'bold-italic': '\\boldsymbol', 'double-struck': '\\mathbb', script: '\\mathcal', '-tex-calligraphic': '\\mathcal', fraktur: '\\mathfrak', 'sans-serif': '\\mathsf', monospace: '\\mathtt' };
+  const CHAR_TEX = {};
+  ('α alpha β beta γ gamma δ delta ϵ epsilon ε varepsilon ζ zeta η eta θ theta ϑ vartheta ι iota κ kappa λ lambda μ mu ν nu ξ xi π pi ϖ varpi ρ rho ϱ varrho '
+    + 'σ sigma ς varsigma τ tau υ upsilon ϕ phi φ varphi χ chi ψ psi ω omega Γ Gamma Δ Delta Θ Theta Λ Lambda Ξ Xi Π Pi Σ Sigma Υ Upsilon Φ Phi Ψ Psi Ω Omega '
+    + 'ℓ ell ∂ partial ∇ nabla ∞ infty ∑ sum ∏ prod ∫ int ∮ oint ⋃ bigcup ⋂ bigcap ⋅ cdot × times ± pm ≤ le ≥ ge ≠ ne ≈ approx ∼ sim ≡ equiv ∝ propto '
+    + '∈ in ∉ notin ⊂ subset ⊆ subseteq ∪ cup ∩ cap → to ← gets ↦ mapsto ⇒ Rightarrow ⇔ Leftrightarrow ∀ forall ∃ exists ¬ neg ∧ land ∨ lor ′ prime ⊤ top ⊥ bot '
+    + '⟨ langle ⟩ rangle ⌊ lfloor ⌋ rfloor ⌈ lceil ⌉ rceil … dots ⋯ cdots ∘ circ ⊙ odot ⊗ otimes ⊕ oplus ∥ parallel ‖ Vert ℏ hbar ∅ emptyset ⋆ star † dagger')
+    .split(' ').forEach((c, i, a) => { if (i % 2 === 0) CHAR_TEX[c] = '\\' + a[i + 1]; });
+  Object.assign(CHAR_TEX, { '−': '-', '{': '\\{', '}': '\\}', '%': '\\%', '&': '\\&', '#': '\\#', '\\': '\\backslash', '\u2061': '', '\u2062': '', '\u2063': '', '\u2064': '' });
+
+  const one = m => { while (m && /^(mrow|mstyle)$/.test(m.localName) && m.children.length === 1) m = m.children[0]; return m; };
+  const okBase = b => { b = one(b); return !!b && (b.localName === 'mi' || (b.localName === 'mo' && BIGOP.test(b.textContent)) || (SCRIPTED.has(b.localName) && okBase(b.children[0]))); };
+  // A plain power (T^2) is not part of the symbol's name: there the symbol is T.
+  const power = m => m.localName === 'msup' && one(m.children[1]).localName === 'mn';
+  const isSym = m => (m.localName === 'mi' ? /\S/.test(m.textContent.replace(/[\u2061-\u2064]/g, '')) : SCRIPTED.has(m.localName) && !power(m) && okBase(m.children[0]));
+  // A script that is only letters, digits and signs belongs to its symbol;
+  // one with structure of its own (x^2 inside an exponent) can be pointed into.
+  const simple = m => !m.querySelector('msub, msup, msubsup, munder, mover, munderover, mfrac, msqrt, mroot, mtable') && !/^(mfrac|msqrt|mroot|mtable)$/.test(m.localName) && !SCRIPTED.has(m.localName);
+
+  // LaTeX for a MathML node: close enough to draw again and to quote to Claude.
+  function mmlTex(m) {
+    const kids = [...m.children], t = m.textContent;
+    const row = list => list.map(mmlTex).filter(Boolean).join(' ');
+    const grp = n => '{' + mmlTex(n) + '}';
+    const arg = n => { const x = mmlTex(n); return /^[A-Za-z0-9]$/.test(x) ? x : '{' + x + '}'; };
+    const base = n => { const x = mmlTex(n), c = one(n); return /^(mrow|mstyle|mfrac)$/.test(c.localName) && c.children.length > 1 ? '{' + x + '}' : x; };
+    switch (m.localName) {
+      case 'mi': {
+        if (t in CHAR_TEX) return CHAR_TEX[t];
+        const v = m.getAttribute('mathvariant');
+        if ([...t].length > 1) return FN.test(t) && !v ? '\\' + t : (VARIANT[v] || '\\mathrm') + '{' + t + '}';
+        return VARIANT[v] && /^[A-Za-z0-9]$/.test(t) ? VARIANT[v] + '{' + t + '}' : t;
+      }
+      case 'mn': return t;
+      case 'mo': return t in CHAR_TEX ? CHAR_TEX[t] : /^[A-Za-z]{2,}$/.test(t) ? (FN.test(t) ? '\\' + t : '\\operatorname{' + t + '}') : t;
+      case 'mtext': return '\\text{' + t + '}';
+      case 'mspace': case 'mphantom': case 'none': return '';
+      case 'msub': case 'munder': return base(kids[0]) + '_' + arg(kids[1]);
+      case 'msup': return base(kids[0]) + '^' + arg(kids[1]);
+      case 'msubsup': case 'munderover': return base(kids[0]) + '_' + arg(kids[1]) + '^' + arg(kids[2]);
+      case 'mover': {
+        const a = kids[1].localName === 'mo' && ACCENT[kids[1].textContent];
+        return a ? a + grp(kids[0]) : base(kids[0]) + '^' + arg(kids[1]);
+      }
+      case 'mfrac': return '\\frac' + grp(kids[0]) + grp(kids[1]);
+      case 'msqrt': return '\\sqrt{' + row(kids) + '}';
+      case 'mroot': return '\\sqrt[' + mmlTex(kids[1]) + ']' + grp(kids[0]);
+      default: return kids.length ? row(kids) : t;
+    }
+  }
+
+  // The <g> elements for the children of the node that `g` draws.
+  function gKids(g) {
+    const out = [];
+    (function walk(e) { for (const c of e.children) { if (c.hasAttribute('data-mml-node')) out.push(c); else walk(c); } })(g);
+    return out;
+  }
+
+  // Pair MathML children with drawn ones, in order, by kind. The drawing may
+  // hold extras (the sign of a square root); anything else unmatched fails.
+  function align(mk, gk) {
+    const out = [];
+    let j = 0;
+    for (const m of mk) {
+      const fits = g => { const k = g.getAttribute('data-mml-node'); return k === m.localName || (m.localName === 'mrow' && k === 'TeXAtom'); };
+      while (j < gk.length && !fits(gk[j])) j++;
+      if (j >= gk.length) return null;
+      out.push(gk[j++]);
+    }
+    return out;
+  }
+
+  // Tag the symbols in a freshly drawn formula. Returns how many there are.
+  function markSyms(node, src, display) {
+    const m = new DOMParser().parseFromString(MathJax.tex2mml(src, { display }), 'application/xml').documentElement;
+    const g = node.querySelector('g[data-mml-node="math"]');
+    if (!g || m.localName !== 'math') return 0;
+    // A formula that is one symbol has nothing smaller to point at.
+    let top = m;
+    while (top.children.length === 1 && /^(math|mrow|mstyle)$/.test(top.localName)) top = top.children[0];
+    if (isSym(top)) return 0;
+    let n = 0;
+    (function walk(m, g) {
+      const mk = [...m.children], gk = align(mk, gKids(g));
+      const sym = isSym(m);
+      if (sym) { g.classList.add('sym'); g.setAttribute('data-tex', mmlTex(m)); n++; }
+      if (!gk) return;
+      if (sym && SCRIPTED.has(m.localName)) {
+        // The base is the symbol itself, and so is a simple script.
+        mk.slice(1).forEach((c, i) => { if (!simple(c)) walk(c, gk[i + 1]); });
+        return;
+      }
+      mk.forEach((c, i) => walk(c, gk[i]));
+    })(m, g);
+    return n;
+  }
+
+  // A clear box behind each symbol: something to hover and click that is
+  // larger than the strokes of a letter, and the place a highlight shows.
+  // Measured once per formula, on the first copy that is on screen, then
+  // kept in the stored drawing so later copies come with their boxes.
+  const boxQueue = new Set();
+  let boxT = null;
+  function boxSyms() {
+    const hosts = [...boxQueue];
+    boxQueue.clear();
+    hosts.forEach(host => {
+      const hit = host._hit;
+      if (!hit || hit.boxed || !host.isConnected) return;
+      const mine = [...host.shadowRoot.querySelectorAll('g.sym')], kept = [...hit.node.querySelectorAll('g.sym')];
+      const boxes = mine.map(g => { try { return g.getBBox(); } catch (e) { return null; } });
+      if (mine.length !== kept.length || boxes.some(b => !b || !b.width || !b.height)) return; // not laid out yet
+      boxes.forEach((b, i) => {
+        const r = svg('rect', { class: 'bg', x: Math.round(b.x - 40), y: Math.round(b.y - 60), width: Math.round(b.width + 80), height: Math.round(b.height + 120), rx: 90 });
+        kept[i].insertBefore(r.cloneNode(), kept[i].firstChild);
+        mine[i].insertBefore(r, mine[i].firstChild);
+      });
+      hit.boxed = true;
+      // Other copies drawn before the boxes were known.
+      document.querySelectorAll('.math').forEach(h => { if (h !== host && h._hit === hit && !h.shadowRoot.querySelector('rect.bg')) drawMath(h); });
+    });
+  }
+
+  const symsOf = (host, tex) => [...host.shadowRoot.querySelectorAll('g.sym')].filter(g => g.getAttribute('data-tex') === tex);
+
+  // Show the threads attached to symbols of this formula. host._marks is
+  // kept, because the drawing is replaced whenever it is drawn again.
+  function applyMarks(host) {
+    (host._marks || []).forEach(mk => symsOf(host, mk.tex).forEach(g => g.classList.add(...mk.cls)));
+  }
+
+  const canPoint = host => !!host.closest('#panes .text[data-node]:not(.streaming)');
+
+  function hotSym(host, g) {
+    if (g === host._hot) return;
+    if (host._hot) host._hot.classList.remove('hot');
+    host._hot = g && canPoint(host) ? g : null;
+    if (host._hot) host._hot.classList.add('hot');
   }
 
   // One formula. `src` is the LaTeX with its delimiters, as Claude wrote it.
@@ -533,7 +697,9 @@
     const host = el(mode === 'block' ? 'div.math.display' : 'span.math', { role: 'img', 'aria-label': tex }, src);
     host._tex = tex;
     host._mode = mode;
-    host.attachShadow({ mode: 'open' });
+    const root = host.attachShadow({ mode: 'open' });
+    root.addEventListener('mouseover', ev => hotSym(host, ev.target.closest ? ev.target.closest('g.sym') : null));
+    host.addEventListener('mouseleave', () => hotSym(host, null));
     drawMath(host);
     return host;
   }
@@ -547,6 +713,12 @@
 
   // A quoted passage, for a heading. A formula on its own needs no quote marks.
   const quoted = s => (formulaOnly(s) ? rich(s) : ['“', rich(s), '”']);
+
+  // What a thread is attached to, for a heading: a passage, a formula, or a
+  // symbol and the formula it is in.
+  const anchorKids = (a, n) => (a.sym ? [rich('$' + a.sym + '$'), el('span.in', {}, ' in '), rich(clip(a.text, n))] : quoted(clip(a.text, n)));
+  // The same, in words for Claude.
+  const about = a => (a.sym ? `the symbol $${a.sym}$ in ${a.text}` : a.text);
 
   // The formulas that lie, at least partly, in [start, end) of an answer.
   function mathIn(c, start, end) {
@@ -813,7 +985,8 @@
 
   const findExisting = p => anchoredKids(p.nodeId).find(n => (p.part
     ? n.anchor.part === p.part && n.anchor.fig === p.fig
-    : !n.anchor.part && iou(n.anchor, p) >= 0.8));
+    : p.sym ? n.anchor.sym === p.sym && n.anchor.start === p.start
+      : !n.anchor.part && !n.anchor.sym && iou(n.anchor, p) >= 0.8));
 
   function setHL(name, range) { if (HAS_HL) CSS.highlights.set(name, new Highlight(range)); }
   function clearHL(name) { if (HAS_HL) CSS.highlights.delete(name); }
@@ -932,10 +1105,11 @@
       n = newNode({
         parent: p.nodeId,
         anchor: p.part ? { start: p.start, end: p.end, text: p.text, fig: p.fig, part: p.part }
-          : p.math ? { start: p.start, end: p.end, text: p.text, math: true } : { start: p.start, end: p.end, text: p.text },
+          : p.sym ? { start: p.start, end: p.end, text: p.text, math: true, sym: p.sym }
+            : p.math ? { start: p.start, end: p.end, text: p.text, math: true } : { start: p.start, end: p.end, text: p.text },
         q: typed || (term ? `What does “${term}” mean here?` : VERBS.explain.q),
         verb: typed ? null : 'explain',
-        prompt: p.part ? LLM.partPrompt(p.text, typed) : p.math ? LLM.formulaPrompt(p.text, typed)
+        prompt: p.part ? LLM.partPrompt(p.text, typed) : p.sym ? LLM.symbolPrompt(p.sym, p.text, typed) : p.math ? LLM.formulaPrompt(p.text, typed)
           : typed ? LLM.askPrompt(p.text, typed) : term ? LLM.termPrompt(term) : LLM.passagePrompt(p.text, 'explain'),
         status: later ? 'queued' : 'open',
         ready: false,
@@ -945,7 +1119,7 @@
       // The passage already has a thread: the question continues it.
       const end = N(tipOf(n.id));
       if (busy(end)) { toast('That thread is still being answered. Ask again in a moment.'); return; }
-      const m = newNode({ parent: end.id, q: typed, prompt: n.anchor.part ? LLM.partPrompt(n.anchor.text, typed) : n.anchor.math ? LLM.formulaPrompt(n.anchor.text, typed) : LLM.askPrompt(n.anchor.text, typed) });
+      const m = newNode({ parent: end.id, q: typed, prompt: n.anchor.part ? LLM.partPrompt(n.anchor.text, typed) : n.anchor.sym ? LLM.symbolPrompt(n.anchor.sym, n.anchor.text, typed) : n.anchor.math ? LLM.formulaPrompt(n.anchor.text, typed) : LLM.askPrompt(n.anchor.text, typed) });
       state.tips[n.id] = m.id;
       focusId = m.id;
       if (n.status === 'resolved') n.status = 'open';
@@ -1037,7 +1211,7 @@
     for (let p = conv.nodes[end]; p; p = conv.nodes[p.parent]) if (p.raw) history.unshift({ prompt: p.prompt, raw: p.raw });
     LLM.side({
       history,
-      prompt: `In one sentence of at most 25 words, state what I should take away from the side thread about "${clip(start.anchor.text, 200)}". Write only that sentence.`,
+      prompt: `In one sentence of at most 25 words, state what I should take away from the side thread about "${clip(about(start.anchor), 240)}". Write only that sentence.`,
       level: prefs.level, tier: 'quick',
     }).then(text => {
       start.takeaway = clip(text.replace(/\s+/g, ' ').trim(), 240);
@@ -1053,7 +1227,7 @@
     if (text.trim().length < 12) { ui.teachResult[id] = { note: 'Write a sentence or two first.' }; paintTeach(id); return; }
     const res = ui.teachResult[id] = { busy: true, text: '' };
     const history = pathTo(tipOf(id)).map(x => conv.nodes[x]).filter(h => h.raw).map(h => ({ prompt: h.prompt, raw: h.raw, sources: h.sources }));
-    const about = start.anchor ? `the side thread about "${clip(start.anchor.text, 200)}"` : 'this whole conversation';
+    const about = start.anchor ? `the side thread about "${clip(about(start.anchor), 240)}"` : 'this whole conversation';
     const mine = () => conv === state && ui.teachResult[id] === res;
     LLM.side({
       history,
@@ -1232,7 +1406,7 @@
 
     if (start.anchor) {
       p.append(el('header', {},
-        el('div.from', { title: start.anchor.text }, quoted(start.anchor.text)),
+        el('div.from', { title: start.anchor.text }, anchorKids(start.anchor, 4000)),
         el('div.acts', {},
           start.status !== 'resolved' && el('button.btn', {
             title: 'Mark this understood and fold it to one line',
@@ -1363,6 +1537,12 @@
         if (part) part.classList.add(...cls.split(' '));
         return;
       }
+      if (k.anchor.sym) {
+        // A thread on one symbol: mark that symbol wherever the formula has it.
+        const host = [...t.querySelectorAll('.math')].find(h => offs(t, h).start === k.anchor.start);
+        if (host) { (host._marks = host._marks || []).push({ tex: k.anchor.sym, cls: cls.split(' ') }); applyMarks(host); }
+        return;
+      }
       const made = wrapRange(t, k.anchor.start, k.anchor.end, () => el('mark', { class: cls, 'data-node': k.id, title }),
         h => { h.classList.add('marked', ...cls.split(' ')); h.title = title; });
       if (made.length) made[made.length - 1].classList.add('last');
@@ -1389,7 +1569,7 @@
       const asked = new Set(path.map(id => N(id).verb));
       Object.keys(VERBS).filter(v => v !== 'explain' && !asked.has(v)).slice(0, 3).forEach(v => out.push({
         label: VERBS[v].q,
-        run: () => addTurn(ci, { q: VERBS[v].q, verb: v, prompt: LLM.followPrompt(start.anchor.text, v) }),
+        run: () => addTurn(ci, { q: VERBS[v].q, verb: v, prompt: LLM.followPrompt(about(start.anchor), v) }),
       }));
     }
     const taken = new Set(typedKids(leaf.id).map(k => k.q));
@@ -1446,7 +1626,7 @@
 
     const msg = el('textarea.msg', {
       id: 'msg-' + key, rows: '1', 'aria-label': 'Your question',
-      placeholder: !col ? 'Ask anything…' : !atEnd ? 'Continue from this point…' : start.anchor ? (start.anchor.part ? 'Ask more about this part of the diagram…' : start.anchor.math ? 'Ask more about this formula…' : 'Ask more about this passage…') : 'Ask a follow-up…',
+      placeholder: !col ? 'Ask anything…' : !atEnd ? 'Continue from this point…' : start.anchor ? (start.anchor.part ? 'Ask more about this part of the diagram…' : start.anchor.sym ? 'Ask more about this symbol…' : start.anchor.math ? 'Ask more about this formula…' : 'Ask more about this passage…') : 'Ask a follow-up…',
     });
     const form = el('form', {}, msg, el('button.btn.primary.send', { type: 'submit', disabled: parts.blocked }, 'Send'));
     const submit = () => {
@@ -1609,13 +1789,21 @@
   const colIndex = c => state.cols.findIndex(col => col.start === c.closest('.pane').dataset.start);
 
   // `formula` is set when the reader clicked a formula, which is then the passage.
-  function openPopFor(c, start, end, formula) {
+  // and `sym` when what they clicked in it was one symbol.
+  function openPopFor(c, start, end, formula, sym) {
     hideGloss();
     const p = { ci: colIndex(c), nodeId: c.dataset.node, start, end, text: c.textContent.slice(start, end), math: !!formula };
+    if (sym) p.sym = sym.getAttribute('data-tex');
     // A formula that already has a thread opens it, as a highlighted passage does.
     const existing = (formula || offline()) && findExisting(p);
     if (existing) { openBeside(p.ci, existing.id); render(); return; }
     if (offline()) { toast('Open this page inside Claude to ask about a passage.'); return; }
+    if (sym) {
+      ui.pendingMath = symsOf(formula, p.sym);
+      ui.pendingMath.forEach(g => g.classList.add('pending'));
+      showPop(p, bounds([sym]));
+      return;
+    }
     const range = offsetsToRange(c, start, end);
     setHL('pending', range);
     // The highlight cannot reach into a formula, so formulas are marked directly.
@@ -1646,7 +1834,7 @@
     // One button for the common case, and a box for anything more specific.
     const pop = $('#pop');
     pop.textContent = '';
-    const box = el('input', { type: 'text', id: 'pop-q', placeholder: p.part ? 'Ask about this part of the diagram…' : p.math ? 'Ask about this formula…' : 'Ask about this part…', 'aria-label': 'Your question about this part', autocomplete: 'off' });
+    const box = el('input', { type: 'text', id: 'pop-q', placeholder: p.part ? 'Ask about this part of the diagram…' : p.sym ? 'Ask about this symbol…' : p.math ? 'Ask about this formula…' : 'Ask about this part…', 'aria-label': 'Your question about this part', autocomplete: 'off' });
     const go = later => ask(p, box.value, later);
     box.addEventListener('keydown', ev => {
       if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229) { ev.preventDefault(); go(false); }
@@ -1757,7 +1945,7 @@
     const open = Object.values(state.nodes).filter(n => n.anchor && n.status !== 'resolved');
     if (open.length) {
       sheet.append(el('h2', {}, 'Still open'),
-        el('ul.open', {}, open.map(n => el('li', {}, rich(n.q), ' ', el('i', {}, quoted(clip(n.anchor.text, 70)))))));
+        el('ul.open', {}, open.map(n => el('li', {}, rich(n.q), ' ', el('i', {}, anchorKids(n.anchor, 70))))));
     }
     m.append(sheet);
     m.classList.add('show');
@@ -1767,7 +1955,7 @@
   function stitch(id, host) {
     const n = N(id);
     if (n.parent) {
-      if (n.anchor) host.append(el('div.danchor', {}, quoted(clip(n.anchor.text, 120))));
+      if (n.anchor) host.append(el('div.danchor', {}, anchorKids(n.anchor, 120)));
       host.append(el('div.dq', {}, rich(n.q)));
     }
     if (n.raw) {
@@ -1797,7 +1985,7 @@
   function outline(id, depth) {
     const n = N(id), pad = '> '.repeat(depth), out = [];
     if (n.parent) {
-      out.push(pad + (n.anchor ? `On “${clip(n.anchor.text, 120)}”: ` : '') + '**' + n.q.replace(/\s+/g, ' ') + '**', pad.trimEnd());
+      out.push(pad + (n.anchor ? `On “${clip(about(n.anchor), 160)}”: ` : '') + '**' + n.q.replace(/\s+/g, ' ') + '**', pad.trimEnd());
     }
     if (n.raw) LLM.parse(n.raw).text.replace(/```graph\n([\s\S]*?)```/g, (m, spec) => toMermaid(spec)).split('\n').forEach(l => out.push((pad + l).trimEnd()));
     out.push('');
@@ -1863,9 +2051,16 @@
       const near = cr && (cr.startContainer.nodeType === 1 ? cr.startContainer : cr.startContainer.parentElement);
       if (near && c.contains(near) && near.closest('.sent')) t = near;
     }
-    // A formula is a passage of its own, even inside a highlighted sentence.
+    // A formula is a passage of its own, even inside a highlighted sentence,
+    // and a symbol in it is a smaller one.
     const f = t.closest('.math');
-    if (f) { const o = offs(c, f); openPopFor(c, o.start, o.end, f); return; }
+    if (f) {
+      const o = offs(c, f);
+      // The click may be on one symbol inside it; the path leads through the drawing.
+      const sym = ev.composedPath().find(x => x.nodeType === 1 && x.classList.contains('sym') && f.shadowRoot.contains(x));
+      openPopFor(c, o.start, o.end, f, sym);
+      return;
+    }
     const g = t.closest('.gloss');
     if (g) { showGloss(g, true); return; }
     const m = t.closest('mark[data-node]');

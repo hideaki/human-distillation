@@ -35,8 +35,19 @@
   }
 
   const words = s => s.trim().split(/\s+/).length;
-  const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
+  // Shorten to about n characters, without cutting a formula in half.
+  function clip(s, n) {
+    if (s.length <= n) return s;
+    let cut = n - 1;
+    for (const m of s.matchAll(MATH_RE)) {
+      const a = m.index, b = a + m[0].length;
+      if (a >= cut) break;
+      if (b > cut) { cut = a > 0 ? a : b; break; }
+    }
+    return s.slice(0, cut).trimEnd() + (cut < s.length ? '…' : '');
+  }
   const quote = s => '“' + clip(s, 46) + '”';
+  const formulaOnly = s => /^\s*(\$\$?[^$]+\$\$?|\\\([^]+\\\)|\\\[[^]+\\\])\s*$/.test(s);
 
   // ---------- state ----------
   // store: every conversation kept in this browser, and the reader's settings.
@@ -128,7 +139,7 @@
 
   function label(n) {
     if (!n.parent) return clip(n.q, 90);
-    if (n.anchor) return quote(n.anchor.text);
+    if (n.anchor) return n.anchor.math || formulaOnly(n.anchor.text) ? clip(n.anchor.text, 46) : quote(n.anchor.text);
     return clip(n.q, 52);
   }
 
@@ -189,9 +200,17 @@
       '',
       'This works because the teacher\'s wrong answers carry information. Shown a photo of a dog, a good teacher might say 95% dog, 4.7% wolf and 0.01% car. That wolf is hundreds of times more likely than car says something about what dogs look like, and a hard label of just "dog" throws it away. Hinton called this hidden signal dark knowledge.',
       '',
-      'In a confident teacher those small probabilities are so close to zero that they barely affect training. To bring them out, both models divide their logits by a temperature T before the softmax. A higher T flattens the distribution, so the differences among unlikely answers become visible.',
+      'In a confident teacher those small probabilities are so close to zero that they barely affect training. To bring them out, both models divide their logits $z_i$ by a temperature $T$ before the softmax:',
       '',
-      'The student is trained on a weighted sum of two losses. One is the KL divergence between the softened teacher and student distributions, multiplied by T². The other is ordinary cross-entropy against the true labels. Once trained, the student runs at T = 1 like any other model.',
+      '$$p_i = \\frac{\\exp(z_i / T)}{\\sum_j \\exp(z_j / T)}$$',
+      '',
+      'A higher $T$ flattens the distribution, so the differences among unlikely answers become visible.',
+      '',
+      'The student is trained on a weighted sum of two losses. One is the KL divergence between the softened teacher and student distributions, multiplied by $T^2$. The other is ordinary cross-entropy against the true labels:',
+      '',
+      '$$L = \\alpha \\, T^2 \\, \\mathrm{KL}\\left(p^{\\text{teacher}} \\,\\|\\, p^{\\text{student}}\\right) + (1 - \\alpha) \\, \\mathrm{CE}\\left(y, p^{\\text{student}}_{T=1}\\right)$$',
+      '',
+      'Once trained, the student runs at $T = 1$ like any other model.',
       '',
       '```graph',
       'Training example -> Teacher : shown to',
@@ -249,10 +268,36 @@
     const lines = text.replace(/\r/g, '').split('\n');
     const item = l => /^\s*(?:[-*•]|\d+[.)])\s+(.*)$/.exec(l);
     const fence = l => /^\s*(```|~~~)/.exec(l);
+    const mopen = l => /^\s*(\$\$|\\\[)/.exec(l);
     let i = 0;
     while (i < lines.length) {
       const l = lines[i];
       if (!l.trim()) { i++; continue; }
+      const mo = mopen(l);
+      if (mo) {
+        // A formula set on its own: $$ ... $$ or \[ ... \], on one line or several.
+        const close = mo[1] === '$$' ? '$$' : '\\]';
+        const buf = [];
+        let rest = l.trim().slice(mo[1].length), j = i, closed = false, tail = '';
+        for (;;) {
+          const k = rest.indexOf(close);
+          if (k >= 0) { buf.push(rest.slice(0, k)); tail = rest.slice(k + close.length).trim(); closed = true; break; }
+          buf.push(rest);
+          if (++j >= lines.length || !lines[j].trim()) break;
+          rest = lines[j];
+        }
+        const tex = buf.join('\n').trim();
+        if (closed && tex) {
+          out.push({ type: 'math', tex, closed: true });
+          i = j + 1;
+          // Words after the formula on the same line start the next paragraph.
+          tail = tail.replace(/^[\s.,;:!?。、]+/, '');
+          if (tail) lines.splice(i, 0, tail);
+          continue;
+        }
+        if (!closed && j >= lines.length) { out.push({ type: 'math', tex, closed: false, raw: lines.slice(i).join(' ') }); break; }
+        // Otherwise it was not a formula after all: read it as text.
+      }
       const f = fence(l);
       if (f) {
         const lang = l.trim().slice(f[1].length).trim().toLowerCase();
@@ -275,8 +320,8 @@
         out.push({ type: ordered ? 'ol' : 'ul', items });
         continue;
       }
-      const buf = [];
-      while (i < lines.length && lines[i].trim() && !fence(lines[i]) && !item(lines[i])) buf.push(lines[i++].trim());
+      const buf = [lines[i++].trim()];
+      while (i < lines.length && lines[i].trim() && !fence(lines[i]) && !item(lines[i]) && !mopen(lines[i])) buf.push(lines[i++].trim());
       const p = buf.join(' ');
       const h = /^#{1,6}\s+(.*)$/.exec(p);
       out.push({ type: 'p', text: h ? '**' + h[1].replace(/\*\*/g, '') + '**' : p.replace(/^>\s?/, '') });
@@ -284,20 +329,53 @@
     return out;
   }
 
-  // Inline markup -> runs of text with a style each.
-  function runs(s) {
+  // A formula inside a line: $...$, \(...\), and $$...$$ or \[...\] when it
+  // sits in the middle of a sentence. A dollar sign that is money is left
+  // alone: an opening $ must touch what follows it, a closing $ must touch
+  // what precedes it and may not be followed by a digit. \$ is a plain dollar.
+  const MATH_SRC = String.raw`\\\$|\$\$(?<dd>[^$]+?)\$\$|\\\[(?<br>[^]+?)\\\]|\\\((?<pa>[^]+?)\\\)|(?<![\\$\w])\$(?![\s$])(?<d>(?:\\[^]|[^$\\])+?)(?<![\s\\])\$(?!\d)`;
+  const MATH_RE = new RegExp(MATH_SRC, 'g');
+  const ATOM_RE = new RegExp('(?<tk>`+)(?<code>[^`]+?)\\k<tk>|' + MATH_SRC, 'g');
+
+  // Split a string into plain text, code and formulas.
+  function pieces(s, re) {
     const out = [];
-    const re = /(`+)([^`]+?)\1|\*\*([^*]+?)\*\*|(?<![\w*])\*([^*\s](?:[^*]*?[^*\s])?)\*(?![\w*])|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
-    let last = 0, m;
-    while ((m = re.exec(s))) {
+    let last = 0;
+    for (const m of s.matchAll(re)) {
       if (m.index > last) out.push({ t: s.slice(last, m.index) });
-      if (m[2] != null) out.push({ t: m[2], kind: 'code' });
-      else if (m[3] != null) out.push({ t: m[3], kind: 'strong' });
-      else if (m[4] != null) out.push({ t: m[4], kind: 'em' });
-      else out.push({ t: m[5], kind: 'a', href: m[6] });
-      last = re.lastIndex;
+      const g = m.groups;
+      if (g.code != null) out.push({ t: g.code, kind: 'code' });
+      else if (m[0] === '\\$') out.push({ t: '$' });
+      else out.push({ t: m[0], kind: 'math', tex: (g.dd ?? g.br ?? g.pa ?? g.d).trim(), mode: g.dd != null || g.br != null ? 'inline-display' : 'inline' });
+      last = m.index + m[0].length;
     }
     if (last < s.length) out.push({ t: s.slice(last) });
+    return out;
+  }
+
+  // Inline markup -> runs of text with a style each. Code and formulas are
+  // set aside first, so nothing inside them is read as markup; `within` is
+  // the style around one of them (a formula inside bold text, say).
+  function runs(s) {
+    const held = [];
+    const flat = pieces(s, ATOM_RE).map(p => (p.kind ? '' + (held.push(p) - 1) + '' : p.t)).join('');
+    const out = [];
+    const add = (t, kind, href) => t.split(/(\d+)/).forEach(bit => {
+      if (!bit) return;
+      const m = /^(\d+)$/.exec(bit);
+      if (m) out.push({ ...held[+m[1]], within: kind, href });
+      else out.push({ t: bit, kind, href });
+    });
+    const re = /\*\*([^*]+?)\*\*|(?<![\w*])\*([^*\s](?:[^*]*?[^*\s])?)\*(?![\w*])|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+    let last = 0, m;
+    while ((m = re.exec(flat))) {
+      if (m.index > last) add(flat.slice(last, m.index));
+      if (m[1] != null) add(m[1], 'strong');
+      else if (m[2] != null) add(m[2], 'em');
+      else add(m[3], 'a', m[4]);
+      last = re.lastIndex;
+    }
+    if (last < flat.length) add(flat.slice(last));
     return out;
   }
 
@@ -336,14 +414,17 @@
     let pos = 0;
     rs.forEach(r => { r.a = pos; pos += r.t.length; r.b = pos; });
     const plain = rs.map(r => r.t).join('');
+    const whole = r => r.kind === 'code' || r.kind === 'math';
     const piece = (from, to) => rs.filter(r => r.b > from && r.a < to).map(r => {
       const t = plain.slice(Math.max(r.a, from), Math.min(r.b, to));
-      if (r.kind === 'a') return el('a', { href: r.href, target: '_blank', rel: 'noopener noreferrer' }, t);
-      return r.kind ? el(r.kind, {}, t) : document.createTextNode(t);
+      const inner = r.kind === 'math' ? mathEl(r.t, r.tex, r.mode) : r.kind === 'code' ? el('code', {}, t) : t;
+      const wrap = whole(r) ? r.within : r.kind;
+      if (wrap === 'a') return el('a', { href: r.href, target: '_blank', rel: 'noopener noreferrer' }, inner);
+      return wrap ? el(wrap, {}, inner) : typeof inner === 'string' ? document.createTextNode(inner) : inner;
     });
     if (!clickable) { host.append(...piece(0, plain.length)); return; }
     let at = 0;
-    sentenceSpans(plain, rs.filter(r => r.kind === 'code').map(r => [r.a, r.b])).forEach(([a, b]) => {
+    sentenceSpans(plain, rs.filter(whole).map(r => [r.a, r.b])).forEach(([a, b]) => {
       if (a > at) host.append(...piece(at, a));
       host.append(el('span.sent', {}, piece(a, b)));
       at = b;
@@ -357,6 +438,10 @@
       if (b.type === 'graph') {
         // Drawn once the block is complete, so it does not jump about while it is written.
         host.append(!b.closed && streaming ? el('div.drawing', {}, 'Drawing a diagram…') : figure(b.text, figs++, clickable));
+      } else if (b.type === 'math') {
+        // An unfinished formula: wait for the rest while it is being written.
+        if (b.closed) host.append(mathEl('$$' + b.tex + '$$', b.tex, 'block'));
+        else host.append(streaming ? el('div.drawing', {}, 'Writing a formula…') : el('p', {}, b.raw));
       } else if (b.type === 'code') {
         host.append(el('pre', {}, el('code', {}, b.text)));
       } else if (b.type === 'p') {
@@ -371,6 +456,111 @@
         })));
       }
     });
+  }
+
+  // ---------- formulas ----------
+  // Claude writes formulas in LaTeX. MathJax turns each into an SVG, drawn
+  // inside a shadow root. The element itself holds the LaTeX source as text
+  // that is never shown, so a formula counts as part of the answer's text:
+  // it has offsets like any passage, and a quoted sentence carries it along.
+
+  const math = { ready: false, wait: false, css: '', cache: new Map(), tries: {} };
+  const MATH_CSS = `
+    :host { -webkit-user-select: none; user-select: none; }
+    mjx-container { margin: 0 !important; }
+    code { font: 0.84em/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+  `;
+
+  // MathJax reads this when its script arrives, which is after this file.
+  if (!window.MathJax) {
+    window.MathJax = {
+      startup: {
+        typeset: false,
+        ready() { MathJax.startup.defaultReady(); MathJax.startup.promise.then(mathReady, () => {}); },
+      },
+      options: { enableMenu: false, enableAssistiveMml: false },
+      // Without "noundefined" an unknown command is an error, and the formula is shown as its source.
+      tex: { packages: { '[-]': ['noundefined'] } },
+      svg: { fontCache: 'none' },
+    };
+  }
+
+  const redrawMath = sel => document.querySelectorAll(sel).forEach(drawMath);
+
+  function mathReady() {
+    try { math.css = MathJax.svgStylesheet().textContent; } catch (e) { math.css = ''; }
+    math.ready = true;
+    redrawMath('.math');
+  }
+
+  // The drawing of one formula, or { bad } when the LaTeX cannot be read, or
+  // null while MathJax (or a part of it the formula needs) is still loading.
+  function typeset(tex, mode) {
+    if (!math.ready || math.wait) return null;
+    const key = mode + '\n' + tex;
+    if (math.cache.has(key)) return math.cache.get(key);
+    let hit;
+    try {
+      const node = MathJax.tex2svg(mode === 'inline-display' ? '\\displaystyle ' + tex : tex, { display: mode === 'block' });
+      hit = node.querySelector('[data-mjx-error]') ? { bad: true } : { node };
+    } catch (e) {
+      math.tries[key] = (math.tries[key] || 0) + 1;
+      if (e && e.retry && math.tries[key] < 4) {
+        // MathJax is fetching a part this formula needs. Nothing else may be
+        // typeset until it has arrived, or MathJax loses track of that part.
+        math.wait = true;
+        const done = () => { math.wait = false; redrawMath('.math.raw'); };
+        e.retry.then(done, () => { math.cache.set(key, { bad: true }); done(); });
+        return null;
+      }
+      hit = { bad: true };
+    }
+    math.cache.set(key, hit);
+    return hit;
+  }
+
+  function drawMath(host) {
+    const root = host.shadowRoot;
+    const hit = typeset(host._tex, host._mode);
+    const drawn = !!(hit && hit.node);
+    host.classList.toggle('raw', !drawn);
+    root.textContent = '';
+    root.append(el('style', {}, MATH_CSS + math.css), drawn ? hit.node.cloneNode(true) : el('code', {}, host._tex));
+  }
+
+  // One formula. `src` is the LaTeX with its delimiters, as Claude wrote it.
+  function mathEl(src, tex, mode) {
+    const host = el(mode === 'block' ? 'div.math.display' : 'span.math', { role: 'img', 'aria-label': tex }, src);
+    host._tex = tex;
+    host._mode = mode;
+    host.attachShadow({ mode: 'open' });
+    drawMath(host);
+    return host;
+  }
+
+  // Text that may hold formulas, for labels, questions and quotes.
+  function rich(s) {
+    s = String(s == null ? '' : s);
+    if (!/[$\\]/.test(s)) return [s];
+    return pieces(s, MATH_RE).map(p => (p.kind === 'math' ? mathEl(p.t, p.tex, 'inline') : p.t));
+  }
+
+  // A quoted passage, for a heading. A formula on its own needs no quote marks.
+  const quoted = s => (formulaOnly(s) ? rich(s) : ['“', rich(s), '”']);
+
+  // The formulas that lie, at least partly, in [start, end) of an answer.
+  function mathIn(c, start, end) {
+    return [...c.querySelectorAll('.math')].filter(h => { const o = offs(c, h); return o.start < end && o.end > start; });
+  }
+
+  // The box around everything in `things` (ranges and elements) that is drawn.
+  function bounds(things) {
+    let l = Infinity, t = Infinity, r = -Infinity, b = -Infinity;
+    things.forEach(x => [...x.getClientRects()].forEach(q => {
+      if (!q.width && !q.height) return;
+      l = Math.min(l, q.left); t = Math.min(t, q.top); r = Math.max(r, q.right); b = Math.max(b, q.bottom);
+    }));
+    return l === Infinity ? things[0].getBoundingClientRect() : new DOMRect(l, t, r - l, b - t);
   }
 
   // ---------- diagrams ----------
@@ -590,18 +780,22 @@
     return r;
   }
 
-  function wrapRange(container, start, end, make) {
+  // Wrap the text in [start, end) with elements from make(). A formula in the
+  // range cannot be wrapped (its text is not what is shown), so it is handed
+  // to onMath instead and returned in place, in reading order.
+  function wrapRange(container, start, end, make, onMath) {
     const w = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
     const hits = [];
     let pos = 0, n;
     while ((n = w.nextNode())) {
       const len = n.nodeValue.length;
       const s = Math.max(start, pos), e = Math.min(end, pos + len);
-      if (s < e) hits.push([n, s - pos, e - pos]);
+      if (s < e) hits.push([n, s - pos, e - pos, n.parentElement.closest('.math')]);
       pos += len;
       if (pos >= end) break;
     }
-    return hits.map(([node, s, e]) => {
+    return hits.map(([node, s, e, host]) => {
+      if (host) { if (onMath) onMath(host); return host; }
       let t = node;
       if (e < t.nodeValue.length) t.splitText(e);
       if (s > 0) t = t.splitText(s);
@@ -734,13 +928,15 @@
     if (!n) {
       created = true;
       // A word or two is usually a term, so the button asks what it means.
-      const term = typed || p.part ? null : p.term || (words(p.text) <= 3 ? p.text : null);
+      const term = typed || p.part || p.math ? null : p.term || (words(p.text) <= 3 ? p.text : null);
       n = newNode({
         parent: p.nodeId,
-        anchor: p.part ? { start: p.start, end: p.end, text: p.text, fig: p.fig, part: p.part } : { start: p.start, end: p.end, text: p.text },
+        anchor: p.part ? { start: p.start, end: p.end, text: p.text, fig: p.fig, part: p.part }
+          : p.math ? { start: p.start, end: p.end, text: p.text, math: true } : { start: p.start, end: p.end, text: p.text },
         q: typed || (term ? `What does “${term}” mean here?` : VERBS.explain.q),
         verb: typed ? null : 'explain',
-        prompt: p.part ? LLM.partPrompt(p.text, typed) : typed ? LLM.askPrompt(p.text, typed) : term ? LLM.termPrompt(term) : LLM.passagePrompt(p.text, 'explain'),
+        prompt: p.part ? LLM.partPrompt(p.text, typed) : p.math ? LLM.formulaPrompt(p.text, typed)
+          : typed ? LLM.askPrompt(p.text, typed) : term ? LLM.termPrompt(term) : LLM.passagePrompt(p.text, 'explain'),
         status: later ? 'queued' : 'open',
         ready: false,
       });
@@ -749,7 +945,7 @@
       // The passage already has a thread: the question continues it.
       const end = N(tipOf(n.id));
       if (busy(end)) { toast('That thread is still being answered. Ask again in a moment.'); return; }
-      const m = newNode({ parent: end.id, q: typed, prompt: n.anchor.part ? LLM.partPrompt(n.anchor.text, typed) : LLM.askPrompt(n.anchor.text, typed) });
+      const m = newNode({ parent: end.id, q: typed, prompt: n.anchor.part ? LLM.partPrompt(n.anchor.text, typed) : n.anchor.math ? LLM.formulaPrompt(n.anchor.text, typed) : LLM.askPrompt(n.anchor.text, typed) });
       state.tips[n.id] = m.id;
       focusId = m.id;
       if (n.status === 'resolved') n.status = 'open';
@@ -1014,7 +1210,7 @@
     return el('button.spine', {
       title: 'Back to: ' + label(n),
       on: { click: () => { state.cols = state.cols.slice(0, i + 1); render(); } },
-    }, label(n));
+    }, rich(label(n)));
   }
 
   function emptyPane() {
@@ -1036,7 +1232,7 @@
 
     if (start.anchor) {
       p.append(el('header', {},
-        el('div.from', { title: start.anchor.text }, '“' + start.anchor.text + '”'),
+        el('div.from', { title: start.anchor.text }, quoted(start.anchor.text)),
         el('div.acts', {},
           start.status !== 'resolved' && el('button.btn', {
             title: 'Mark this understood and fold it to one line',
@@ -1052,7 +1248,7 @@
     if (start.status === 'resolved') {
       body.append(el('div.banner', {},
         el('b', {}, '✓ Resolved'),
-        el('span', {}, start.takeaway || ''),
+        el('span', {}, rich(start.takeaway || '')),
         el('button.linkbtn', { on: { click: () => { start.status = 'open'; render(); } } }, 'Reopen')));
     }
     path.forEach((id, i) => body.append(turn(N(id), ci, path, i)));
@@ -1062,7 +1258,7 @@
 
   function turn(n, ci, path, i) {
     return el('div.turn', { 'data-node': n.id },
-      el('div.user', {}, el('div.bubble', {}, n.q)),
+      el('div.user', {}, el('div.bubble', {}, rich(n.q))),
       answer(n, ci, path, i));
   }
 
@@ -1146,7 +1342,8 @@
     t.dataset.node = n.id;
     if (busy(n)) { t.classList.add('streaming'); return t; }
 
-    const full = t.textContent, used = [];
+    // A term is never matched inside a formula's source.
+    const full = t.textContent, used = [...t.querySelectorAll('.math')].map(h => { const o = offs(t, h); return [o.start, o.end]; });
     parsed.terms.forEach((term, i) => {
       if (prefs.known[term.term.toLowerCase()]) return;
       const hit = findTerm(full, term.term, used);
@@ -1166,7 +1363,8 @@
         if (part) part.classList.add(...cls.split(' '));
         return;
       }
-      const made = wrapRange(t, k.anchor.start, k.anchor.end, () => el('mark', { class: cls, 'data-node': k.id, title }));
+      const made = wrapRange(t, k.anchor.start, k.anchor.end, () => el('mark', { class: cls, 'data-node': k.id, title }),
+        h => { h.classList.add('marked', ...cls.split(' ')); h.title = title; });
       if (made.length) made[made.length - 1].classList.add('last');
     });
     return t;
@@ -1211,7 +1409,7 @@
 
     const row = el('div.chips');
     if (!working) {
-      chips(col, ci, path).forEach(c => row.append(el('button.chip', { type: 'button', disabled: offline(), on: { click: c.run } }, c.label)));
+      chips(col, ci, path).forEach(c => row.append(el('button.chip', { type: 'button', disabled: offline(), on: { click: c.run } }, rich(c.label))));
     }
 
     const opts = el('div.opts');
@@ -1248,7 +1446,7 @@
 
     const msg = el('textarea.msg', {
       id: 'msg-' + key, rows: '1', 'aria-label': 'Your question',
-      placeholder: !col ? 'Ask anything…' : !atEnd ? 'Continue from this point…' : start.anchor ? (start.anchor.part ? 'Ask more about this part of the diagram…' : 'Ask more about this passage…') : 'Ask a follow-up…',
+      placeholder: !col ? 'Ask anything…' : !atEnd ? 'Continue from this point…' : start.anchor ? (start.anchor.part ? 'Ask more about this part of the diagram…' : start.anchor.math ? 'Ask more about this formula…' : 'Ask more about this passage…') : 'Ask a follow-up…',
     });
     const form = el('form', {}, msg, el('button.btn.primary.send', { type: 'submit', disabled: parts.blocked }, 'Send'));
     const submit = () => {
@@ -1345,7 +1543,7 @@
     b.hidden = !nx;
     if (nx) {
       b.textContent = '';
-      b.append('Next open question →', el('small', {}, label(N(nx))));
+      b.append('Next open question →', el('small', {}, rich(label(N(nx)))));
       b.onclick = () => reveal(nx);
     }
   }
@@ -1362,7 +1560,7 @@
       on: { click: () => reveal(id) },
     },
     dot,
-    el('span.lab', {}, label(n), n.anchor && n.status === 'resolved' && n.takeaway && el('span.take', {}, n.takeaway)),
+    el('span.lab', {}, rich(label(n)), n.anchor && n.status === 'resolved' && n.takeaway && el('span.take', {}, rich(n.takeaway))),
     busy(n) ? el('span.state', {}, 'writing…') : n.status === 'queued' && el('span.state', {}, 'ready'));
 
     const li = el('li', {}, row);
@@ -1410,18 +1608,20 @@
 
   const colIndex = c => state.cols.findIndex(col => col.start === c.closest('.pane').dataset.start);
 
-  function openPopFor(c, start, end) {
+  // `formula` is set when the reader clicked a formula, which is then the passage.
+  function openPopFor(c, start, end, formula) {
     hideGloss();
-    const p = { ci: colIndex(c), nodeId: c.dataset.node, start, end, text: c.textContent.slice(start, end) };
-    if (offline()) {
-      // Nothing new can be asked here; a passage that already has a thread still opens it.
-      const existing = findExisting(p);
-      if (existing) { openBeside(p.ci, existing.id); render(); } else toast('Open this page inside Claude to ask about a passage.');
-      return;
-    }
+    const p = { ci: colIndex(c), nodeId: c.dataset.node, start, end, text: c.textContent.slice(start, end), math: !!formula };
+    // A formula that already has a thread opens it, as a highlighted passage does.
+    const existing = (formula || offline()) && findExisting(p);
+    if (existing) { openBeside(p.ci, existing.id); render(); return; }
+    if (offline()) { toast('Open this page inside Claude to ask about a passage.'); return; }
     const range = offsetsToRange(c, start, end);
     setHL('pending', range);
-    showPop(p, range.getBoundingClientRect());
+    // The highlight cannot reach into a formula, so formulas are marked directly.
+    ui.pendingMath = mathIn(c, start, end);
+    ui.pendingMath.forEach(h => h.classList.add('pending'));
+    showPop(p, bounds([range, ...ui.pendingMath]));
   }
 
   // Ask about a box or a link in a diagram.
@@ -1446,7 +1646,7 @@
     // One button for the common case, and a box for anything more specific.
     const pop = $('#pop');
     pop.textContent = '';
-    const box = el('input', { type: 'text', id: 'pop-q', placeholder: p.part ? 'Ask about this part of the diagram…' : 'Ask about this part…', 'aria-label': 'Your question about this part', autocomplete: 'off' });
+    const box = el('input', { type: 'text', id: 'pop-q', placeholder: p.part ? 'Ask about this part of the diagram…' : p.math ? 'Ask about this formula…' : 'Ask about this part…', 'aria-label': 'Your question about this part', autocomplete: 'off' });
     const go = later => ask(p, box.value, later);
     box.addEventListener('keydown', ev => {
       if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229) { ev.preventDefault(); go(false); }
@@ -1465,6 +1665,7 @@
     ui.pending = null;
     clearHL('pending');
     if (ui.pendingEl) { ui.pendingEl.classList.remove('pending'); ui.pendingEl = null; }
+    if (ui.pendingMath) { ui.pendingMath.forEach(h => h.classList.remove('pending')); ui.pendingMath = null; }
     $('#pop').classList.remove('show');
   }
 
@@ -1500,7 +1701,7 @@
     pop.textContent = '';
     pop.append(
       el('div.t', {}, T.term),
-      el('div.d', {}, T.gloss),
+      el('div.d', {}, rich(T.gloss)),
       el('div.acts', {},
         !offline() && el('button.linkbtn', { on: { click: () => glossMore(g, T) } }, 'Explain more →'),
         el('button.linkbtn', { on: { click: () => { prefs.known[k] = T.term; render(); toast(`“${T.term}” will no longer be defined.`); } } }, 'I know this')));
@@ -1550,13 +1751,13 @@
     }, 'Copy as Markdown');
     const sheet = el('div.sheet', {},
       el('div.bar2', {}, el('div.kicker', {}, 'Write-up'), copy, el('button.btn', { on: { click: closeModal } }, 'Close')),
-      el('h1', {}, N('root').q),
+      el('h1', {}, rich(N('root').q)),
       el('div.note', {}, 'Every branch of the conversation, stitched together in reading order. Side threads are set in under the passage they came from.'));
     stitch('root', sheet);
     const open = Object.values(state.nodes).filter(n => n.anchor && n.status !== 'resolved');
     if (open.length) {
       sheet.append(el('h2', {}, 'Still open'),
-        el('ul.open', {}, open.map(n => el('li', {}, n.q + ' ', el('i', {}, '“' + clip(n.anchor.text, 70) + '”')))));
+        el('ul.open', {}, open.map(n => el('li', {}, rich(n.q), ' ', el('i', {}, quoted(clip(n.anchor.text, 70)))))));
     }
     m.append(sheet);
     m.classList.add('show');
@@ -1566,8 +1767,8 @@
   function stitch(id, host) {
     const n = N(id);
     if (n.parent) {
-      if (n.anchor) host.append(el('div.danchor', {}, '“' + clip(n.anchor.text, 120) + '”'));
-      host.append(el('div.dq', {}, n.q));
+      if (n.anchor) host.append(el('div.danchor', {}, quoted(clip(n.anchor.text, 120))));
+      host.append(el('div.dq', {}, rich(n.q)));
     }
     if (n.raw) {
       const t = buildText(n, true);
@@ -1662,6 +1863,9 @@
       const near = cr && (cr.startContainer.nodeType === 1 ? cr.startContainer : cr.startContainer.parentElement);
       if (near && c.contains(near) && near.closest('.sent')) t = near;
     }
+    // A formula is a passage of its own, even inside a highlighted sentence.
+    const f = t.closest('.math');
+    if (f) { const o = offs(c, f); openPopFor(c, o.start, o.end, f); return; }
     const g = t.closest('.gloss');
     if (g) { showGloss(g, true); return; }
     const m = t.closest('mark[data-node]');

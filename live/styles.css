@@ -270,6 +270,18 @@ button.chip:hover:not(:disabled) { outline: 1px solid var(--faint); }
 .figure { margin: 0 0 1em; }
 .drawing { margin: 0 0 1em; border: 1px dashed var(--faint); border-radius: 8px; padding: 14px; text-align: center; font: 13px var(--ui); color: var(--muted); }
 
+/* A formula: clickable as a passage of its own. */
+.math { border-radius: 3px; }
+.math.display { display: block; margin: 0 0 1em; padding: 6px 0; text-align: center; overflow-x: auto; overflow-y: hidden; }
+li > .math.display, li .sent > .math.display { margin: 0.5em 0; }
+.text[data-node]:not(.streaming) .math { cursor: pointer; transition: background-color 0.1s; }
+.text[data-node]:not(.streaming) .math:hover { background: var(--hl); }
+.math.marked.open { background: var(--hl); }
+.math.marked.active, .math.pending { background: var(--hl-on); }
+.math.marked.queued { background: var(--queued); box-shadow: inset 0 -2px 0 var(--queued-line); }
+.math.marked.resolved { box-shadow: inset 0 -2px 0 var(--done-line); }
+.side .math, .pane > header .math, .bubble .math, .chip .math { pointer-events: none; }
+
 .sent { border-radius: 3px; cursor: pointer; transition: background-color 0.1s; padding: 0.2em 0; }
 .text:not(.streaming) .sent:hover { background: color-mix(in srgb, var(--hl) 55%, transparent); }
 .text.streaming .sent { cursor: default; }

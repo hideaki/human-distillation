@@ -8,6 +8,7 @@
 //   #deny     behave as if the viewer did not allow Claude
 //   #slow     think for five seconds
 //   #long     write a much longer answer
+//   #math     formulas of every kind, including ones that should not be drawn
 //   notion    use the Notion tools, when the page offers them
 
 (() => {
@@ -35,7 +36,7 @@
       ].join('\n');
     }
 
-    const passage = /^About this (part|term)/.test(q) || /^Still about the part/.test(q);
+    const passage = /^About this (part|term|formula)/.test(q) || /^Still about the part/.test(q);
     if (/^Show what you just explained as a diagram/.test(q)) {
       return ['Here is the placeholder as a diagram.', '', '```graph', 'A -> B : leads to', 'B -> C', 'A <-> C : compared with', '```', '', '@@@', 'next: What does B do?'].join('\n');
     }
@@ -59,7 +60,11 @@
       '',
       'It can also contain a short list:',
       '- an item with `inline code` in it',
-      '- an item with **strong** words and a formula such as p_i = exp(z_i / T) / sum_j exp(z_j / T)',
+      '- an item with **strong** words and a formula such as $p_i = \\frac{\\exp(z_i / T)}{\\sum_j \\exp(z_j / T)}$',
+      '',
+      'A formula can also stand on a line of its own, and each one can be clicked:',
+      '',
+      '$$L = \\alpha \\, T^2 \\, \\mathrm{KL}(p \\,\\|\\, q) + (1 - \\alpha) \\, \\mathrm{CE}(y, q)$$',
       '',
       '```graph',
       'Question -> Stand-in runtime : sent to',
@@ -73,6 +78,22 @@
       '    print(step)',
       '```',
     ];
+    if (/#math/.test(q)) {
+      body.push('',
+        'Money is not a formula: it costs $5 today and $10 tomorrow, or \\$7 with a coupon. Here **the bold part holds $x^2$ too**, and `$not_math$` stays code.',
+        '',
+        'Other delimiters: \\(a^2 + b^2 = c^2\\) inside a sentence, a displayed one mid-sentence $$\\int_0^1 x \\, dx = \\tfrac{1}{2}$$ and then several lines:',
+        '',
+        '\\[',
+        '\\begin{aligned} (a + b)^2 &= a^2 + 2ab + b^2 \\\\ (a - b)^2 &= a^2 - 2ab + b^2 \\end{aligned}',
+        '\\]',
+        '',
+        'A part of MathJax loaded on demand: $\\boldsymbol{\\beta}$ and $\\cancel{x}$. Broken LaTeX stays as text: $\\frac{a}{$. An unknown command: $\\notacommand{x}$. Japanese inside: $\\text{損失} = 0$.',
+        '',
+        '$$',
+        '\\underbrace{\\sum_{i=1}^{n} \\left( y_i - \\hat{y}_i \\right)^2}_{\\text{squared error}} + \\lambda \\lVert w \\rVert_2^2 + \\frac{1}{2\\sigma^2} \\sum_{k=1}^{K} \\left( \\theta_k - \\mu_k \\right)^2 + \\log \\det \\Sigma + \\frac{n}{2} \\log 2\\pi',
+        '$$');
+    }
     if (notes.length) body.push('', 'From Notion the stand-in read: ' + notes.join('; ') + '.');
     if (/#long/.test(q)) {
       for (let i = 1; i <= 8; i++) body.push('', `Paragraph ${i} of a longer answer. It is here to see how the page behaves when an answer runs past the bottom of the view. Nothing in it is true or useful.`);

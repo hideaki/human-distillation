@@ -1227,11 +1227,11 @@
     if (text.trim().length < 12) { ui.teachResult[id] = { note: 'Write a sentence or two first.' }; paintTeach(id); return; }
     const res = ui.teachResult[id] = { busy: true, text: '' };
     const history = pathTo(tipOf(id)).map(x => conv.nodes[x]).filter(h => h.raw).map(h => ({ prompt: h.prompt, raw: h.raw, sources: h.sources }));
-    const about = start.anchor ? `the side thread about "${clip(about(start.anchor), 240)}"` : 'this whole conversation';
+    const subject = start.anchor ? `the side thread about "${clip(about(start.anchor), 240)}"` : 'this whole conversation';
     const mine = () => conv === state && ui.teachResult[id] === res;
     LLM.side({
       history,
-      prompt: `I will now explain ${about} back in my own words, so that you can check my understanding. Compare it with what you told me above. Reply in three short parts, each on its own line and starting with its label: "Right:" for what I have right, "Off or missing:" for what is wrong or missing (or "nothing important"), and "Check yourself:" for one question that tests my weakest point. Be specific and brief.\n\nMy explanation:\n${text.trim()}`,
+      prompt: `I will now explain ${subject} back in my own words, so that you can check my understanding. Compare it with what you told me above. Reply in three short parts, each on its own line and starting with its label: "Right:" for what I have right, "Off or missing:" for what is wrong or missing (or "nothing important"), and "Check yourself:" for one question that tests my weakest point. Be specific and brief.\n\nMy explanation:\n${text.trim()}`,
       level: prefs.level, tier: prefs.tier, effort: 'low',
       onText: t => { res.text = t; if (mine()) paintTeach(id); },
     }).then(t => { res.text = t; }, e => { res.err = LLM.errorText(e && e.code); })

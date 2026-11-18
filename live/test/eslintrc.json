@@ -1,0 +1,8 @@
+{
+  "root": true,
+  "parserOptions": { "ecmaVersion": 2021, "sourceType": "script" },
+  "rules": {
+    "no-shadow": ["error", { "hoist": "all" }],
+    "no-use-before-define": ["error", { "functions": false, "classes": false, "variables": false }]
+  }
+}

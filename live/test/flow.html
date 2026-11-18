@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flow tests</title>
+<style>
+  :root { color-scheme: light dark; --ok: #1a7f37; --bad: #c62828; --dim: #6b7280; --line: #d0d4da; }
+  body { margin: 0; font: 13px/1.45 system-ui, sans-serif; }
+  .report { padding: 14px 16px 18px; max-width: 980px; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  h2 { font-size: 13px; margin: 18px 0 6px; }
+  #summary { font-weight: 600; }
+  #summary.pass { color: var(--ok); }
+  #summary.fail { color: var(--bad); }
+  .how { color: var(--dim); margin: 2px 0 0; }
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; vertical-align: top; }
+  th { font-weight: 600; }
+  td.pass { color: var(--ok); }
+  td.fail { color: var(--bad); font-weight: 600; }
+  td.na, td.wait { color: var(--dim); }
+  ol { margin: 0; padding-left: 26px; }
+  li.pass::marker { color: var(--ok); }
+  li.fail { color: var(--bad); }
+  li.wait { color: var(--dim); }
+  li small { color: var(--dim); }
+  li pre { margin: 2px 0 6px; white-space: pre-wrap; font: 12px/1.4 ui-monospace, Menlo, monospace; }
+  /* The page under test, at the size each test asks for. */
+  #app { display: block; border: 0; border-top: 2px solid var(--line); width: 1440px; height: 900px; background: #fff; }
+</style>
+</head>
+<body>
+<div class="report">
+  <h1>Human Distillation: flow tests</h1>
+  <div id="summary">Starting…</div>
+  <p class="how">Each test loads the real page below with the stand-in for Claude and drives it. Results are also in <code>window.__results</code>.
+    Add <code>?only=words</code> to run the tests whose name contains those words, <code>?page=built</code> to drive the single-file build.</p>
+  <h2>Every action, in every kind of thread</h2>
+  <table id="grid"></table>
+  <h2>All tests</h2>
+  <ol id="list"></ol>
+</div>
+<iframe id="app" title="The page under test"></iframe>
+<script src="/test/flow.js"></script>
+</body>
+</html>

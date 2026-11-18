@@ -7,6 +7,11 @@ same, so the local view matches the published one.
   /        the page with a stand-in for Claude (placeholder answers)
   /bare    the page with no runtime at all, as a plain copy would see it
   /built   the single-file build (run build.py first), with the stand-in
+  /test    the flow tests: they drive the page below and report in the page
+           (/test?page=built drives the single-file build instead)
+  /under-test, /built-under-test
+           the page as the flow tests load it: the stand-in, plus a probe
+           that records errors and what was sent to Claude (see TESTING.md)
 
 Run:  python3 live/dev.py        then open http://localhost:4174/
 """
@@ -26,11 +31,16 @@ SKELETON = (
     "</head><body>"
 )
 STAND_IN = '<script src="/dev-runtime.js"></script>'
+PROBE = '<script src="/test/probe.js"></script>'
 PAGES = {
-    "/": ("page.html", True),
-    "/bare": ("page.html", False),
-    "/built": ("dist/human-distillation.html", True),
+    "/": ("page.html", STAND_IN),
+    "/bare": ("page.html", ""),
+    "/built": ("dist/human-distillation.html", STAND_IN),
+    "/under-test": ("page.html", STAND_IN + PROBE),
+    "/built-under-test": ("dist/human-distillation.html", STAND_IN + PROBE),
 }
+# Served as they are, with no skeleton around them.
+PLAIN = {"/test": "test/flow.html"}
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -43,14 +53,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0].split("#")[0]
-        if path not in PAGES:
+        if path in PLAIN:
+            html = (HERE / PLAIN[path]).read_text("utf-8")
+        elif path in PAGES:
+            name, before = PAGES[path]
+            source = HERE / name
+            if not source.exists():
+                self.send_error(404, f"{name} does not exist yet")
+                return
+            html = SKELETON + before + source.read_text("utf-8") + "</body></html>"
+        else:
             return super().do_GET()
-        name, stand_in = PAGES[path]
-        source = HERE / name
-        if not source.exists():
-            self.send_error(404, f"{name} does not exist yet")
-            return
-        html = SKELETON + (STAND_IN if stand_in else "") + source.read_text("utf-8") + "</body></html>"
         body = html.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")

@@ -1,0 +1,8 @@
+{
+  "name": "human-distillation",
+  "private": true,
+  "description": "A chat for understanding complex ideas, in which any part of an answer can be asked about.",
+  "scripts": {
+    "test": "node live/test/run.js"
+  }
+}

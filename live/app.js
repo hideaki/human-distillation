@@ -193,6 +193,14 @@
       '',
       'The student is trained on a weighted sum of two losses. One is the KL divergence between the softened teacher and student distributions, multiplied by T². The other is ordinary cross-entropy against the true labels. Once trained, the student runs at T = 1 like any other model.',
       '',
+      '```graph',
+      'Training example -> Teacher : shown to',
+      'Training example -> Student : shown to',
+      'Teacher -> Soft targets : softened by T',
+      'Soft targets -> Student : KL loss',
+      'True labels -> Student : cross-entropy loss',
+      '```',
+      '',
       LLM.SEP,
       'term: output distribution = The probabilities a model gives to each possible answer. They add up to 1.',
       'term: hard label = A training target that names only the correct class: 100% on it and 0% on everything else.',
@@ -247,11 +255,13 @@
       if (!l.trim()) { i++; continue; }
       const f = fence(l);
       if (f) {
+        const lang = l.trim().slice(f[1].length).trim().toLowerCase();
         const buf = [];
         i++;
         while (i < lines.length && !lines[i].trim().startsWith(f[1])) buf.push(lines[i++]);
+        const closed = i < lines.length;
         i++;
-        out.push({ type: 'code', text: buf.join('\n') });
+        out.push({ type: lang === 'graph' ? 'graph' : 'code', text: buf.join('\n'), closed });
         continue;
       }
       if (item(l)) {
@@ -341,9 +351,13 @@
     if (at < plain.length) host.append(...piece(at, plain.length));
   }
 
-  function renderBlocks(host, text, clickable) {
+  function renderBlocks(host, text, clickable, streaming) {
+    let figs = 0;
     blocks(text).forEach(b => {
-      if (b.type === 'code') {
+      if (b.type === 'graph') {
+        // Drawn once the block is complete, so it does not jump about while it is written.
+        host.append(!b.closed && streaming ? el('div.drawing', {}, 'Drawing a diagram…') : figure(b.text, figs++, clickable));
+      } else if (b.type === 'code') {
         host.append(el('pre', {}, el('code', {}, b.text)));
       } else if (b.type === 'p') {
         const p = el('p');
@@ -357,6 +371,189 @@
         })));
       }
     });
+  }
+
+  // ---------- diagrams ----------
+  // Claude writes a diagram as a list of relations, one per line:
+  //     Teacher -> Soft targets : produces
+  // The page lays it out and draws it, so every box and link is an element
+  // that can be pointed at. It is drawn inside a shadow root, which keeps its
+  // labels out of the answer's text and so out of the passage offsets.
+
+  const ARROW = /\s*(<-+>|-+>|--+|→|↔)\s*/;
+
+  function parseGraph(spec) {
+    const nodes = [], edges = [], ids = new Map();
+    const node = raw => {
+      const label = raw.trim().replace(/^["'[(]+|["'\])]+$/g, '').replace(/\s+/g, ' ');
+      if (!label) return -1;
+      const key = label.toLowerCase();
+      if (!ids.has(key)) { ids.set(key, nodes.length); nodes.push({ label }); }
+      return ids.get(key);
+    };
+    spec.split('\n').forEach(line => {
+      line = line.trim();
+      if (!line || line.startsWith('%%') || /^(graph|flowchart|direction)\b/i.test(line)) return;
+      const parts = line.split(ARROW); // [name, arrow, name, arrow, name, ...]
+      if (parts.length < 3) { node(line); return; }
+      let label = '';
+      const m = /^(.+?)\s*:\s+(.+)$/.exec(parts[parts.length - 1]);
+      if (m) { parts[parts.length - 1] = m[1]; label = m[2].trim(); }
+      for (let k = 0; k + 2 < parts.length; k += 2) {
+        const from = node(parts[k]), to = node(parts[k + 2]), arrow = parts[k + 1];
+        if (from < 0 || to < 0 || from === to) continue;
+        edges.push({ from, to, label: k + 3 === parts.length ? label : '', both: /^<|↔/.test(arrow), plain: /^-+$/.test(arrow) });
+      }
+    });
+    return { nodes: nodes.slice(0, 16), edges: edges.filter(e => e.from < 16 && e.to < 16).slice(0, 28) };
+  }
+
+  const edgeText = (g, e) => g.nodes[e.from].label + (e.both ? ' ↔ ' : e.plain ? ' — ' : ' → ') + g.nodes[e.to].label + (e.label ? ' (' + e.label + ')' : '');
+  const nodePart = n => 'n:' + n.label.toLowerCase();
+  const edgePart = (g, e) => 'e:' + g.nodes[e.from].label.toLowerCase() + '>' + g.nodes[e.to].label.toLowerCase() + '|' + e.label.toLowerCase();
+
+  const meter = document.createElement('canvas').getContext('2d');
+  const UI_FONT = 'Inter, -apple-system, "Segoe UI", "Hiragino Sans", system-ui, sans-serif';
+  function textW(t, font) { meter.font = font; return meter.measureText(t).width; }
+
+  function wrapLabel(label, max) {
+    const out = [];
+    let cur = '';
+    // Words where there are spaces; otherwise (Japanese, Chinese) a few characters at a time.
+    const bits = /\s/.test(label) ? label.split(' ') : label.match(/.{1,10}/gu) || [label];
+    const glue = /\s/.test(label) ? ' ' : '';
+    bits.forEach(b => {
+      if (cur && (cur + glue + b).length > max) { out.push(cur); cur = b; } else cur = cur ? cur + glue + b : b;
+    });
+    if (cur) out.push(cur);
+    return out;
+  }
+
+  const NS = 'http://www.w3.org/2000/svg';
+  function svg(tag, attrs, ...kids) {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs || {})) if (v != null && v !== false) e.setAttribute(k, v);
+    for (const kid of kids.flat(Infinity)) if (kid != null && kid !== false) e.append(kid);
+    return e;
+  }
+
+  const FIG_CSS = `
+    :host { display: block; }
+    svg { display: block; max-width: 100%; height: auto; margin: 0 auto; font-family: ${UI_FONT}; }
+    .node rect { fill: var(--chip); stroke: var(--line); }
+    .node text { fill: var(--ink); font-size: 13px; font-weight: 500; }
+    .edge .line { fill: none; stroke: var(--faint); stroke-width: 1.4; }
+    .edge .tip { fill: var(--faint); }
+    .edge .hit { fill: none; stroke: transparent; stroke-width: 14; }
+    .edge .lab rect { fill: var(--pane); }
+    .edge .lab text { fill: var(--muted); font-size: 11.5px; }
+    .can .part { cursor: pointer; outline: none; }
+    .can .node:hover rect, .can .node:focus-visible rect { stroke: var(--accent); stroke-width: 2; }
+    .can .edge:hover .line, .can .edge:focus-visible .line { stroke: var(--accent); stroke-width: 2; }
+    .can .edge:hover .tip, .can .edge:focus-visible .tip { fill: var(--accent); }
+    .can .edge:hover .lab text, .can .edge:focus-visible .lab text { fill: var(--accent); }
+    .node.open rect { fill: var(--hl); stroke: var(--hl-on); }
+    .node.open.active rect, .node.pending rect { fill: var(--hl-on); stroke: var(--hl-on); }
+    .node.queued rect { fill: var(--queued); stroke: var(--queued-line); }
+    .node.resolved rect { stroke: var(--done-line); stroke-width: 2; }
+    .edge.open .line, .edge.pending .line { stroke: var(--hl-on); stroke-width: 3; }
+    .edge.open .tip, .edge.pending .tip { fill: var(--hl-on); }
+    .edge.queued .line { stroke: var(--queued-line); stroke-width: 2.5; }
+    .edge.queued .tip { fill: var(--queued-line); }
+    .edge.resolved .line { stroke: var(--done-line); stroke-width: 2; }
+    .edge.resolved .tip { fill: var(--done-line); }
+    ul { margin: 0; padding: 10px 12px 10px 28px; border: 1px dashed var(--faint); border-radius: 8px; font: 14px/1.5 ${UI_FONT}; color: var(--ink); }
+  `;
+
+  // One diagram. With `clickable`, each box and link opens the ask menu.
+  function figure(spec, index, clickable) {
+    const host = el('div.figure', { 'data-fig': String(index) });
+    const root = host.attachShadow({ mode: 'open' });
+    root.append(el('style', {}, FIG_CSS));
+    const g = parseGraph(spec);
+    if (!g.nodes.length) return host;
+
+    if (typeof dagre === 'undefined') {
+      // The layout library did not load: still show the relations, as a list.
+      root.append(el('ul', {}, g.edges.length ? g.edges.map(e => el('li', {}, edgeText(g, e))) : g.nodes.map(n => el('li', {}, n.label))));
+      return host;
+    }
+
+    const lay = new dagre.graphlib.Graph({ multigraph: true });
+    lay.setGraph({ rankdir: 'TB', nodesep: 26, ranksep: 46, marginx: 6, marginy: 6 });
+    lay.setDefaultEdgeLabel(() => ({}));
+    g.nodes.forEach((n, i) => {
+      n.lines = wrapLabel(n.label, 18);
+      n.w = Math.ceil(Math.max(...n.lines.map(t => textW(t, '500 13px ' + UI_FONT)))) + 26;
+      n.h = n.lines.length * 17 + 16;
+      lay.setNode('n' + i, { width: n.w, height: n.h });
+    });
+    g.edges.forEach((e, i) => {
+      e.lw = e.label ? Math.ceil(textW(e.label, '11.5px ' + UI_FONT)) + 10 : 0;
+      lay.setEdge('n' + e.from, 'n' + e.to, { width: e.lw, height: e.label ? 18 : 0, labelpos: 'c' }, 'e' + i);
+    });
+    try { dagre.layout(lay); } catch (err) { root.append(el('ul', {}, g.edges.map(e => el('li', {}, edgeText(g, e))))); return host; }
+
+    const size = lay.graph();
+    const W = Math.ceil(size.width), H = Math.ceil(size.height);
+    const out = svg('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'img', 'aria-label': 'Diagram: ' + g.edges.map(e => edgeText(g, e)).join('; '), class: clickable ? 'can' : '' });
+    const r1 = v => Math.round(v * 10) / 10;
+    const tip = (a, b) => { // an arrowhead at b, coming from a
+      const d = Math.hypot(b.x - a.x, b.y - a.y) || 1, ux = (b.x - a.x) / d, uy = (b.y - a.y) / d;
+      return svg('polygon', { class: 'tip', points: [[b.x, b.y], [b.x - ux * 8 - uy * 4, b.y - uy * 8 + ux * 4], [b.x - ux * 8 + uy * 4, b.y - uy * 8 - ux * 4]].map(q => r1(q[0]) + ',' + r1(q[1])).join(' ') });
+    };
+    const wire = (part, text) => {
+      const e = svg('g', { class: 'part', 'data-part': part });
+      if (clickable) {
+        e.setAttribute('tabindex', '0');
+        e.setAttribute('role', 'button');
+        e.setAttribute('aria-label', 'Ask about ' + text);
+        e.addEventListener('click', () => askPart(host, part, text, e));
+        e.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); askPart(host, part, text, e); } });
+      }
+      return e;
+    };
+
+    g.edges.forEach((e, i) => {
+      const pos = lay.edge({ v: 'n' + e.from, w: 'n' + e.to, name: 'e' + i });
+      const pts = pos.points;
+      let d = `M${r1(pts[0].x)},${r1(pts[0].y)}`;
+      for (let k = 1; k < pts.length - 1; k++) {
+        const last = k === pts.length - 2, nx = last ? pts[k + 1].x : (pts[k].x + pts[k + 1].x) / 2, ny = last ? pts[k + 1].y : (pts[k].y + pts[k + 1].y) / 2;
+        d += `Q${r1(pts[k].x)},${r1(pts[k].y)} ${r1(nx)},${r1(ny)}`;
+      }
+      if (pts.length === 2) d += `L${r1(pts[1].x)},${r1(pts[1].y)}`;
+      const ge = wire(edgePart(g, e), edgeText(g, e));
+      ge.classList.add('edge');
+      ge.append(svg('path', { class: 'line', d }), svg('path', { class: 'hit', d }));
+      if (!e.plain) ge.append(tip(pts[pts.length - 2], pts[pts.length - 1]));
+      if (e.both) ge.append(tip(pts[1], pts[0]));
+      if (e.label && pos.x != null) {
+        ge.append(svg('g', { class: 'lab' },
+          svg('rect', { x: r1(pos.x - e.lw / 2), y: r1(pos.y - 9), width: e.lw, height: 18, rx: 4 }),
+          svg('text', { x: r1(pos.x), y: r1(pos.y + 4), 'text-anchor': 'middle' }, e.label)));
+      }
+      out.append(ge);
+    });
+    g.nodes.forEach((n, i) => {
+      const pos = lay.node('n' + i);
+      const gn = wire(nodePart(n), n.label);
+      gn.classList.add('node');
+      gn.append(svg('rect', { x: r1(pos.x - n.w / 2), y: r1(pos.y - n.h / 2), width: n.w, height: n.h, rx: 8 }));
+      n.lines.forEach((t, k) => gn.append(svg('text', { x: r1(pos.x), y: r1(pos.y - (n.lines.length - 1) * 8.5 + k * 17 + 4.5), 'text-anchor': 'middle' }, t)));
+      out.append(gn);
+    });
+    root.append(out);
+    return host;
+  }
+
+  // The same relations as a Mermaid flowchart, for the Markdown export.
+  function toMermaid(spec) {
+    const g = parseGraph(spec), q = t => '"' + t.replace(/"/g, "'") + '"';
+    return ['```mermaid', 'flowchart TD',
+      ...g.nodes.map((n, i) => `  n${i}[${q(n.label)}]`),
+      ...g.edges.map(e => `  n${e.from} ${e.both ? '<-->' : e.plain ? '---' : '-->'}${e.label ? '|' + q(e.label) + '|' : ''} n${e.to}`),
+      '```'].join('\n');
   }
 
   // ---------- offsets ----------
@@ -420,7 +617,9 @@
     return inter / ((a.end - a.start) + (b.end - b.start) - inter);
   }
 
-  const findExisting = p => anchoredKids(p.nodeId).find(n => iou(n.anchor, p) >= 0.8);
+  const findExisting = p => anchoredKids(p.nodeId).find(n => (p.part
+    ? n.anchor.part === p.part && n.anchor.fig === p.fig
+    : !n.anchor.part && iou(n.anchor, p) >= 0.8));
 
   function setHL(name, range) { if (HAS_HL) CSS.highlights.set(name, new Highlight(range)); }
   function clearHL(name) { if (HAS_HL) CSS.highlights.delete(name); }
@@ -535,13 +734,13 @@
     if (!n) {
       created = true;
       // A word or two is usually a term, so the button asks what it means.
-      const term = typed ? null : p.term || (words(p.text) <= 3 ? p.text : null);
+      const term = typed || p.part ? null : p.term || (words(p.text) <= 3 ? p.text : null);
       n = newNode({
         parent: p.nodeId,
-        anchor: { start: p.start, end: p.end, text: p.text },
+        anchor: p.part ? { start: p.start, end: p.end, text: p.text, fig: p.fig, part: p.part } : { start: p.start, end: p.end, text: p.text },
         q: typed || (term ? `What does “${term}” mean here?` : VERBS.explain.q),
         verb: typed ? null : 'explain',
-        prompt: typed ? LLM.askPrompt(p.text, typed) : term ? LLM.termPrompt(term) : LLM.passagePrompt(p.text, 'explain'),
+        prompt: p.part ? LLM.partPrompt(p.text, typed) : typed ? LLM.askPrompt(p.text, typed) : term ? LLM.termPrompt(term) : LLM.passagePrompt(p.text, 'explain'),
         status: later ? 'queued' : 'open',
         ready: false,
       });
@@ -550,7 +749,7 @@
       // The passage already has a thread: the question continues it.
       const end = N(tipOf(n.id));
       if (busy(end)) { toast('That thread is still being answered. Ask again in a moment.'); return; }
-      const m = newNode({ parent: end.id, q: typed, prompt: LLM.askPrompt(n.anchor.text, typed) });
+      const m = newNode({ parent: end.id, q: typed, prompt: n.anchor.part ? LLM.partPrompt(n.anchor.text, typed) : LLM.askPrompt(n.anchor.text, typed) });
       state.tips[n.id] = m.id;
       focusId = m.id;
       if (n.status === 'resolved') n.status = 'open';
@@ -942,7 +1141,7 @@
   function buildText(n, plain) {
     const parsed = LLM.parse(n.raw);
     const t = el('div.text');
-    renderBlocks(t, parsed.text, !plain);
+    renderBlocks(t, parsed.text, !plain, busy(n));
     if (plain) { t.classList.add('static'); return t; }
     t.dataset.node = n.id;
     if (busy(n)) { t.classList.add('streaming'); return t; }
@@ -960,6 +1159,13 @@
     anchoredKids(n.id).forEach(k => {
       const cls = k.status + (starts.has(k.id) ? ' active' : '') + (k.status === 'queued' && !busy(k) ? ' ready' : '');
       const title = k.status === 'resolved' ? (k.takeaway || 'Resolved') : k.status === 'queued' ? 'Queued: ' + k.q : k.q;
+      if (k.anchor.part) {
+        // A thread on a box or link of a diagram: mark that part.
+        const fig = t.querySelector(`.figure[data-fig="${k.anchor.fig}"]`);
+        const part = fig && [...fig.shadowRoot.querySelectorAll('.part')].find(e => e.dataset.part === k.anchor.part);
+        if (part) part.classList.add(...cls.split(' '));
+        return;
+      }
       const made = wrapRange(t, k.anchor.start, k.anchor.end, () => el('mark', { class: cls, 'data-node': k.id, title }));
       if (made.length) made[made.length - 1].classList.add('last');
     });
@@ -991,6 +1197,9 @@
     const taken = new Set(typedKids(leaf.id).map(k => k.q));
     LLM.parse(leaf.raw).next.filter(q => !taken.has(q)).slice(0, start.anchor ? 2 : 3)
       .forEach(q => out.push({ label: q, run: () => send(ci, q) }));
+    if (leaf.phase === 'done' && !/^\s*```graph/m.test(leaf.raw)) {
+      out.push({ label: 'Show this as a diagram', run: () => addTurn(ci, { q: 'Show this as a diagram', prompt: LLM.DRAW }) });
+    }
     return out;
   }
 
@@ -1039,7 +1248,7 @@
 
     const msg = el('textarea.msg', {
       id: 'msg-' + key, rows: '1', 'aria-label': 'Your question',
-      placeholder: !col ? 'Ask anything…' : !atEnd ? 'Continue from this point…' : start.anchor ? 'Ask more about this passage…' : 'Ask a follow-up…',
+      placeholder: !col ? 'Ask anything…' : !atEnd ? 'Continue from this point…' : start.anchor ? (start.anchor.part ? 'Ask more about this part of the diagram…' : 'Ask more about this passage…') : 'Ask a follow-up…',
     });
     const form = el('form', {}, msg, el('button.btn.primary.send', { type: 'submit', disabled: parts.blocked }, 'Send'));
     const submit = () => {
@@ -1212,12 +1421,32 @@
     }
     const range = offsetsToRange(c, start, end);
     setHL('pending', range);
+    showPop(p, range.getBoundingClientRect());
+  }
+
+  // Ask about a box or a link in a diagram.
+  function askPart(host, part, text, target) {
+    const c = host.closest('#panes .text[data-node]:not(.streaming)');
+    if (!c) return;
+    const at = offs(c, host).start;
+    const p = { ci: colIndex(c), nodeId: c.dataset.node, start: at, end: at, text, fig: +host.dataset.fig, part };
+    const existing = findExisting(p);
+    if (existing) { openBeside(p.ci, existing.id); render(); return; }
+    if (offline()) { toast('Open this page inside Claude to ask about a part of the diagram.'); return; }
+    hideGloss();
+    closePop();
+    target.classList.add('pending');
+    ui.pendingEl = target;
+    showPop(p, target.getBoundingClientRect());
+  }
+
+  function showPop(p, rect) {
     ui.pending = p;
 
     // One button for the common case, and a box for anything more specific.
     const pop = $('#pop');
     pop.textContent = '';
-    const box = el('input', { type: 'text', id: 'pop-q', placeholder: 'Ask about this part…', 'aria-label': 'Your question about this part', autocomplete: 'off' });
+    const box = el('input', { type: 'text', id: 'pop-q', placeholder: p.part ? 'Ask about this part of the diagram…' : 'Ask about this part…', 'aria-label': 'Your question about this part', autocomplete: 'off' });
     const go = later => ask(p, box.value, later);
     box.addEventListener('keydown', ev => {
       if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229) { ev.preventDefault(); go(false); }
@@ -1226,7 +1455,7 @@
       el('button.primary', { title: 'Enter, with the box empty', on: { click: () => ask(p, '', false) } }, VERBS.explain.q),
       box,
       el('button.later', { title: 'Ask in the background and keep reading. Uses your question if you typed one.', on: { click: () => go(true) } }, 'Later'));
-    place(pop, range.getBoundingClientRect(), false);
+    place(pop, rect, false);
     // Ready to type on a desktop; on a touch screen wait for a tap, so the keyboard stays down.
     if (!matchMedia('(hover: none)').matches) box.focus({ preventScroll: true });
   }
@@ -1235,6 +1464,7 @@
     if (!ui.pending) return;
     ui.pending = null;
     clearHL('pending');
+    if (ui.pendingEl) { ui.pendingEl.classList.remove('pending'); ui.pendingEl = null; }
     $('#pop').classList.remove('show');
   }
 
@@ -1345,8 +1575,10 @@
       const spans = parts.map(p => offs(t, p));
       const ks = anchoredKids(id).filter(k => k.raw);
       parts.forEach((p, pi) => {
-        host.append(el('div.text.static', {}, p));
-        ks.filter(k => k.anchor.start >= spans[pi].start && k.anchor.start < spans[pi].end).forEach(k => {
+        const fig = p.classList.contains('figure');
+        host.append(fig ? p : el('div.text.static', {}, p));
+        ks.filter(k => (fig ? k.anchor.part && k.anchor.fig === +p.dataset.fig
+          : !k.anchor.part && k.anchor.start >= spans[pi].start && k.anchor.start < spans[pi].end)).forEach(k => {
           const b = el('div.dbranch');
           stitch(k.id, b);
           host.append(b);
@@ -1366,7 +1598,7 @@
     if (n.parent) {
       out.push(pad + (n.anchor ? `On “${clip(n.anchor.text, 120)}”: ` : '') + '**' + n.q.replace(/\s+/g, ' ') + '**', pad.trimEnd());
     }
-    if (n.raw) LLM.parse(n.raw).text.split('\n').forEach(l => out.push((pad + l).trimEnd()));
+    if (n.raw) LLM.parse(n.raw).text.replace(/```graph\n([\s\S]*?)```/g, (m, spec) => toMermaid(spec)).split('\n').forEach(l => out.push((pad + l).trimEnd()));
     out.push('');
     anchoredKids(id).filter(k => k.raw).forEach(k => out.push(...outline(k.id, depth + 1)));
     const typed = typedKids(id);
@@ -1422,7 +1654,7 @@
 
     let t = ev.target.nodeType === 1 ? ev.target : ev.target.parentElement;
     const c = textHost(t);
-    if (!c || t.closest('a')) return;
+    if (!c || t.closest('a') || t.closest('.figure')) return;
     // A click in the gap between two lines lands on the paragraph, not on a
     // sentence; resolve it to the nearest text instead of ignoring it.
     if (!t.closest('.sent') && document.caretRangeFromPoint) {

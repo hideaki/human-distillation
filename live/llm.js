@@ -27,6 +27,8 @@ const LLM = (() => {
 
   const passagePrompt = (text, verb) => `About this part of your answer:\n"${text}"\n\n${VERBS[verb].ask}`;
   const askPrompt = (text, question) => `About this part of your answer:\n"${text}"\n\n${question}`;
+  const partPrompt = (text, question) => `About this part of your diagram: "${text}"\n\n${question || 'Explain this part further: what it is, and how it relates to what it is connected to.'}`;
+  const DRAW = 'Show what you just explained as a diagram, with a sentence or two around it.';
   const termPrompt = term => `About this term in your answer: "${term}"\n\nWhat does it mean here, and why does it matter for this topic?`;
   const followPrompt = (text, verb) => `Still about the part I pointed at ("${clip(text, 200)}"): ${VERBS[verb].ask}`;
   const PLAIN = `\n\n(For this reply only: plain text, with no ${SEP} section.)`;
@@ -82,6 +84,7 @@ const LLM = (() => {
       '- Keep it short enough to read in one go, usually two to four short paragraphs. They will ask for more where they need it, so do not try to cover everything.',
       '- One idea per sentence where you can. Any sentence may be pointed at on its own, so each should make sense when quoted alone.',
       '- Plain prose. Use a short list only for things that really are a list, and a code block only for code. No headings, no tables and no LaTeX: write formulas in plain text, like p_i = exp(z_i / T) / sum_j exp(z_j / T).',
+      '- Use a diagram whenever the answer is about several things and how they relate: a process, a pipeline, a chain of causes, the parts of a system. Do this without being asked, and leave it out when prose alone is clear. Write it as a fenced block that opens with ```graph and holds one relation per line in the form "From -> To : label" (the label is optional, "--" draws a link with no arrow). Use short names of one to four words, spell a thing the same way every time it appears, and keep to nine things or fewer. The app draws it, and the person can click any box or link to ask about it. Put it where it helps the text, at most one per answer, and still explain in prose.',
       '- When the question quotes a part of your earlier answer, answer about that part only, in a few sentences, without repeating the answer it came from.',
       '- If you are not sure of something, say so in the sentence where it matters.',
       '- Reply in the language the person writes in.',
@@ -351,7 +354,7 @@ const LLM = (() => {
     SEP, VERBS, rt, ready,
     onChange(fn) { changed = fn; },
     ask, side, parse,
-    passagePrompt, askPrompt, termPrompt, followPrompt,
+    passagePrompt, askPrompt, partPrompt, termPrompt, followPrompt, DRAW,
     errorText, isFinal: code => FINAL.has(code),
   };
 })();

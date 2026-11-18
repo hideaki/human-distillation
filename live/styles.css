@@ -267,6 +267,9 @@ button.chip:hover:not(:disabled) { outline: 1px solid var(--faint); }
 .text pre { overflow-x: auto; background: var(--chip); border-radius: 8px; padding: 10px 12px; }
 .text pre code { background: transparent; padding: 0; font-size: 13px; line-height: 1.5; white-space: pre; }
 
+.figure { margin: 0 0 1em; }
+.drawing { margin: 0 0 1em; border: 1px dashed var(--faint); border-radius: 8px; padding: 14px; text-align: center; font: 13px var(--ui); color: var(--muted); }
+
 .sent { border-radius: 3px; cursor: pointer; transition: background-color 0.1s; padding: 0.2em 0; }
 .text:not(.streaming) .sent:hover { background: color-mix(in srgb, var(--hl) 55%, transparent); }
 .text.streaming .sent { cursor: default; }

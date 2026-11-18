@@ -36,6 +36,9 @@
     }
 
     const passage = /^About this (part|term)/.test(q) || /^Still about the part/.test(q);
+    if (/^Show what you just explained as a diagram/.test(q)) {
+      return ['Here is the placeholder as a diagram.', '', '```graph', 'A -> B : leads to', 'B -> C', 'A <-> C : compared with', '```', '', '@@@', 'next: What does B do?'].join('\n');
+    }
     if (passage) {
       return [
         `Placeholder answer about the part you pointed at. A real answer would deal with that **one passage** and nothing else, in a few sentences.`,
@@ -57,6 +60,13 @@
       'It can also contain a short list:',
       '- an item with `inline code` in it',
       '- an item with **strong** words and a formula such as p_i = exp(z_i / T) / sum_j exp(z_j / T)',
+      '',
+      '```graph',
+      'Question -> Stand-in runtime : sent to',
+      'Stand-in runtime -> Placeholder answer : writes',
+      'Placeholder answer -> Page : streamed to',
+      'Page -> Diagram : draws',
+      '```',
       '',
       '```',
       'for step in range(3):',

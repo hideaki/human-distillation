@@ -46,8 +46,14 @@
         '',
         `It would lean on the ${depth} earlier answer${depth === 1 ? '' : 's'} on this path for context. It would not see any other branch.`,
         '',
+        // Like Claude, it goes on using a term the first answer defined
+        // (stand-in runtime) without defining it again, and gives one term
+        // (inline code) a definition of its own.
+        'It comes from the same stand-in runtime as the first answer, and it has no inline code in it.',
+        '',
         '@@@',
         'term: passage = The sentence or phrase you pointed at.',
+        'term: inline code = Code set inside a sentence, as this side answer defines it.',
         'next: Give me a second example',
         'next: How does this connect to the main question?',
       ].join('\n');

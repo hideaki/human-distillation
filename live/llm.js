@@ -97,8 +97,8 @@ const LLM = (() => {
     }
     lines.push(
       '',
-      `After the answer, add a line containing only ${SEP} and then:`,
-      `- for each term in your answer that this reader may not know, one line of the form "term: <the term exactly as it appears in your answer> = <a one-sentence plain definition>". At most ${o.level === 2 ? 4 : 6}; none is fine.${known.length ? ' They already know these, so never list them: ' + known.join(', ') + '.' : ''}`,
+      `After every answer, however short, add a line containing only ${SEP} and then the lines below. This holds just as much for an answer about a quoted part, a formula, a symbol or a part of a diagram.`,
+      `- for each term in your answer that this reader may not know, one line of the form "term: <the term exactly as it appears in your answer> = <a one-sentence plain definition>". At most ${o.level === 2 ? 4 : 6}; none is fine. A term you defined earlier in this conversation keeps its definition in the app, so list only the terms that are new in this answer.${known.length ? ' They already know these, so never list them: ' + known.join(', ') + '.' : ''}`,
       '- up to three lines of the form "next: <a question this person would naturally ask next>", each under twelve words.',
       'Write nothing after those lines.');
     return lines.join('\n');

@@ -62,6 +62,7 @@
   const lastCol = () => { const c = cols(); return c[c.length - 1]; };
   const lastStart = () => lastCol().start;
   const ids = () => new Set(Object.keys(conv().nodes));
+  const pathLength = id => { let n = 0; for (let x = node(id); x; x = node(x.parent)) n++; return n; };
   const calls = () => win.__calls;
   const lastCall = () => calls()[calls().length - 1];
   const pane = start => $(`#panes .pane[data-start="${start}"]`);
@@ -884,6 +885,80 @@
     has(n.prompt, 'About this term in your answer: "inline code"', 'The question sent');
     ok(!$('#gloss.show'), 'The definition closes');
     eq(conv().looked['inline code'], 'inline code', 'What was looked up');
+  });
+
+  // A term is defined once and used again in the answers that follow. Those
+  // answers show it dotted too, with the definition it was given.
+
+  const glossIn = (id, term) => $$('.gloss', answerText(id)).find(g => txt(g).toLowerCase() === term);
+  // Click a dotted term; what the definition box then says: [term, definition].
+  async function definition(g, what) {
+    const term = txt(ok(g, `${what} is dotted`)).toLowerCase();
+    await click(g, what);
+    await until(() => $('#gloss.show') && txt($('#gloss .t')).toLowerCase() === term, `the definition of ${what} to appear`);
+    return [txt($('#gloss .t')), txt($('#gloss .d'))];
+  }
+
+  test('Terms', 'a term defined in an earlier answer stays dotted in the answers below it, three levels down', async () => {
+    await given('passage');
+    const a = lastStart();
+    const fromFirst = 'A local replacement for Claude that returns canned text, used for testing the page.';
+    lacks(node(a).raw.split('@@@')[1], 'stand-in runtime', 'The trailer of the side answer');
+    same(await definition(glossIn(a, 'stand-in runtime'), '"stand-in runtime" in the side answer'), ['stand-in runtime', fromFirst], 'A term only the first answer defined');
+    // A definition of its own wins over one it could borrow, in both places.
+    same(await definition(glossIn(a, 'inline code'), '"inline code" in the side answer'), ['inline code', 'Code set inside a sentence, as this side answer defines it.'], 'A term the side answer defines itself');
+    same(await definition(glossIn('root', 'inline code'), '"inline code" in the first answer'), ['inline code', 'A short piece of code set inside a sentence.'], 'The same term in the first answer');
+    same(await definition(glossIn(a, 'passage'), '"passage" in the side answer'), ['passage', 'The sentence or phrase you pointed at.'], 'A term of its own');
+    // A thread inside the thread: the third level.
+    await click(sentence(answerText(a), 'It would not see any other branch'), 'a sentence in the thread');
+    const b = await explain();
+    eq(pathLength(b), 3, 'Levels down to the inner answer');
+    same(await definition(glossIn(b, 'stand-in runtime'), '"stand-in runtime" three levels down'), ['stand-in runtime', fromFirst], 'Three levels down');
+    eq(conv().looked['stand-in runtime'], 'stand-in runtime', 'What was looked up');
+    // Claude is told that it need not repeat a definition, and that every answer gets the section.
+    has(lastCall().turns[0].content, 'After every answer, however short, add a line containing only @@@', 'The rules sent to Claude');
+    has(lastCall().turns[0].content, 'a formula, a symbol or a part of a diagram', 'The rules sent to Claude');
+    has(lastCall().turns[0].content, 'so list only the terms that are new in this answer', 'The rules sent to Claude');
+    // "I know this" takes the dots away everywhere, not only where it was pressed.
+    await click(button($('#gloss'), 'I know this'), '"I know this"');
+    await until(() => !$$('#panes .gloss').some(g => txt(g) === 'stand-in runtime'), 'the dots to go from every answer on screen');
+    ok(glossIn(b, 'passage') && glossIn(a, 'inline code'), 'Other terms stay dotted');
+    if ($('#panes .spine')) await click($('#panes .spine'), 'the strip of the main thread');
+    await until(() => pane('root'), 'the main thread');
+    ok(!glossIn('root', 'stand-in runtime') && glossIn('root', 'inline code'), 'The first answer no longer dots it either');
+  });
+
+  test('Terms', 'which definition a borrowed term gets: its own, then the answers above it, then the rest; longer terms first', async () => {
+    const rootText = 'The KL of two distributions is small. Softmax comes first, then the temperature.';
+    const at = s => ({ start: rootText.indexOf(s), end: rootText.indexOf(s) + s.length, text: s });
+    const turn = (id, seq, anchor, text, terms) => ({
+      id, seq, parent: id === 'root' ? null : 'root', anchor, q: id === 'root' ? 'What is KL?' : 'Explain further', prompt: 'Question ' + id,
+      raw: text + '\n\n@@@\n' + terms.map(([t, d]) => `term: ${t} = ${d}`).join('\n'), phase: 'done', status: 'open', ready: true,
+    });
+    const made = {
+      id: 'made', title: 'What is KL?', created: 1, updated: 2, seq: 3, tips: {}, looked: {}, teach: {},
+      cols: [{ start: 'root', leaf: 'root' }, { start: 'n1', leaf: 'n1' }],
+      nodes: {
+        root: turn('root', 0, null, rootText, [['KL', "The first answer's KL."], ['softmax', "The first answer's softmax."]]),
+        // On screen beside the first answer. It defines one term and uses four.
+        n1: turn('n1', 1, at('The KL of two distributions is small.'), 'Here KL divergence matters more than plain KL does. The softmax and the temperature shape it.',
+          [['temperature', "This answer's own temperature."]]),
+        // Another thread, not on screen and not above n1.
+        n2: turn('n2', 2, at('Softmax comes first, then the temperature.'), 'Another thread.',
+          [['KL divergence', "The other thread's KL divergence."], ['softmax', "The other thread's softmax."], ['temperature', "The other thread's temperature."]]),
+      },
+    };
+    await load({ seed: JSON.stringify({ v: 1, current: 'made', convs: { made }, prefs: {} }) });
+    same($$('.gloss', answerText('n1')).map(txt), ['KL divergence', 'KL', 'softmax', 'temperature'], 'Dotted in the side answer');
+    same(await definition(glossIn('n1', 'kl divergence'), '"KL divergence"'), ['KL divergence', "The other thread's KL divergence."], 'The longer term is found whole, from a thread elsewhere');
+    same(await definition(glossIn('n1', 'kl'), '"KL"'), ['KL', "The first answer's KL."], 'The shorter term, where it stands alone');
+    same(await definition(glossIn('n1', 'softmax'), '"softmax"'), ['softmax', "The first answer's softmax."], 'The answer above comes before a thread elsewhere');
+    same(await definition(glossIn('n1', 'temperature'), '"temperature"'), ['temperature', "This answer's own temperature."], 'Its own definition comes before any other');
+    // The first answer borrows too, from the answers after it, in the order they were asked.
+    same($$('.gloss', mainText()).map(txt), ['KL', 'Softmax', 'temperature'], 'Dotted in the first answer');
+    same(await definition(glossIn('root', 'temperature'), '"temperature" in the first answer'), ['temperature', "This answer's own temperature."], 'Borrowed from the earlier of two later answers');
+    same(await definition(glossIn('root', 'softmax'), '"Softmax" in the first answer'), ['softmax', "The first answer's softmax."], 'Its own definition');
+    eq(calls().length, 0, 'Requests to Claude');
   });
 
   // ----- carrying on -----

@@ -1519,6 +1519,30 @@
     return box;
   }
 
+  // The terms an answer shows a definition for. Its own come first, in the
+  // order Claude gave them. Then come the terms other answers of this
+  // conversation have defined: Claude defines a term once, and goes on using
+  // it in the answers below, which would otherwise show it undefined. For
+  // those, the answers this one follows from count first, the nearest first,
+  // then every other answer in the order it was asked. The first definition
+  // of a term wins. The borrowed ones are tried longest first, so that
+  // "KL divergence" is found before the "KL" inside it.
+  function termsFor(n) {
+    const own = LLM.parse(n.raw).terms, borrowed = [];
+    const seen = new Set(own.map(t => t.term.toLowerCase()));
+    const take = m => {
+      if (m === n || !m.raw) return;
+      LLM.parse(m.raw).terms.forEach(t => {
+        const key = t.term.toLowerCase();
+        if (!seen.has(key)) { seen.add(key); borrowed.push(t); }
+      });
+    };
+    for (let p = N(n.parent); p; p = N(p.parent)) take(p);
+    Object.values(state.nodes).sort(bySeq).forEach(take);
+    borrowed.sort((a, b) => b.term.length - a.term.length);
+    return [...own, ...borrowed];
+  }
+
   // An answer's text, with its glossed terms and the passages that have threads.
   function buildText(n, plain) {
     const parsed = LLM.parse(n.raw);
@@ -1530,12 +1554,15 @@
 
     // A term is never matched inside a formula's source.
     const full = t.textContent, used = [...t.querySelectorAll('.math')].map(h => { const o = offs(t, h); return [o.start, o.end]; });
-    parsed.terms.forEach((term, i) => {
-      if (prefs.known[term.term.toLowerCase()]) return;
+    termsFor(n).forEach(term => {
+      const key = term.term.toLowerCase();
+      if (prefs.known[key]) return;
       const hit = findTerm(full, term.term, used);
       if (!hit) return;
       used.push(hit);
-      wrapRange(t, hit[0], hit[1], () => el('span.gloss', { 'data-term': String(i) }));
+      // Marked with the term itself, not its place in the list: the list
+      // grows as other answers arrive, and this text is not drawn again then.
+      wrapRange(t, hit[0], hit[1], () => el('span.gloss', { 'data-term': key }));
     });
 
     const starts = new Set(state.cols.map(c => c.start));
@@ -1887,7 +1914,7 @@
   function termOf(g) {
     const c = g.closest('.text[data-node]');
     const n = c && N(c.dataset.node);
-    return n ? LLM.parse(n.raw).terms[+g.dataset.term] : null;
+    return n ? termsFor(n).find(t => t.term.toLowerCase() === g.dataset.term) || null : null;
   }
 
   function showGloss(g, pinned) {

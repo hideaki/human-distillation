@@ -1586,11 +1586,13 @@
             : failed ? `Search for “${clip(s.query, 30)}” failed: ${failed}`
               : `Searched “${clip(s.query, 40)}”, ${s.hits} found`));
       } else if (s.state === 'running') {
-        box.append(el('span.src.running', {}, 'Reading a page…'));
+        box.append(el('span.src.running', {}, s.title ? `Reading more of “${clip(s.title, 40)}”…` : 'Reading a page…'));
       } else if (failed) {
         box.append(el('span.src.error', {}, 'Could not read a page: ' + failed));
       } else {
-        const name = clip(s.title || 'Notion page', 60);
+        // A long page is read in parts. Say so when some were left unread.
+        const some = s.of > 1 && s.parts && s.parts.length < s.of ? ` (${LLM.partSpan(s.parts)} of ${s.of})` : '';
+        const name = clip(s.title || 'Notion page', 60) + some;
         box.append(/^https:\/\//.test(s.url || '')
           ? el('a.src', { href: s.url, target: '_blank', rel: 'noopener noreferrer' }, name)
           : el('span.src', {}, name));

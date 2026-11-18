@@ -14,7 +14,12 @@ const LLM = (() => {
   const SEP = '@@@';
   const enc = new TextEncoder();
   const bytes = s => enc.encode(s).length;
-  const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
+  // The first n characters at most, never cut through the middle of one.
+  const clip = (s, n) => {
+    if (s.length <= n) return s;
+    const half = s.charCodeAt(n - 2);
+    return s.slice(0, half >= 0xD800 && half <= 0xDBFF ? n - 2 : n - 1).trimEnd() + '…';
+  };
 
   // The one-click questions about a passage. `q` is what the reader sees,
   // `ask` is what Claude is asked.
@@ -95,7 +100,7 @@ const LLM = (() => {
       '- Reply in the language the person writes in.',
     ];
     if (o.notion) {
-      lines.push('- You can look in this person\'s Notion with notion_search and notion_fetch. Use them when the question is about their own notes, documents, projects or team, or when they ask you to. Call them without announcing it, read what you need, then write the answer and name the pages it draws on. For general knowledge, answer without them.');
+      lines.push('- You can look in this person\'s Notion with notion_search and notion_fetch. Use them when the question is about their own notes, documents, projects or team, or when they ask you to. Call them without announcing it, read what you need, then write the answer and name the pages it draws on. A long page comes in numbered parts: read the parts the question needs before you answer, and if you leave any unread, say which. For general knowledge, answer without them.');
     }
     lines.push(
       '',
@@ -139,17 +144,85 @@ const LLM = (() => {
 
   // ---------- Notion, through the viewer's own connector ----------
 
+  // What a page function hands back to Claude may be 32 KB once JSON-encoded.
+  // RESULT stays under that. A page longer than RESULT is read in parts: PART
+  // is the text of one, which leaves room for the notes around it, of which
+  // OUTLINE is the list of what each part holds. CARRY is how much of a page
+  // travels on with the answer for later questions.
+  const RESULT = 30000, PART = 25000, OUTLINE = 3000, CARRY = 12000;
+  // The most page text one answer may read, in bytes. Every round sends all
+  // of it to Claude again, on top of the turns of the thread.
+  const READ = 180000, READ_LEAST = 60000;
+
+  const jsonSize = x => bytes(JSON.stringify(x));
+
   // A string no longer than `max` bytes once JSON-encoded, which is how tool
   // results are measured.
   function capJson(s, max, note) {
-    const size = x => bytes(JSON.stringify(x));
-    if (size(s) <= max) return s;
+    if (jsonSize(s) <= max) return s;
     let lo = 0, hi = s.length;
     while (lo < hi) {
       const mid = (lo + hi + 1) >> 1;
-      if (size(s.slice(0, mid)) <= max) lo = mid; else hi = mid - 1;
+      if (jsonSize(s.slice(0, mid)) <= max) lo = mid; else hi = mid - 1;
     }
+    const half = s.charCodeAt(lo - 1);
+    if (half >= 0xD800 && half <= 0xDBFF) lo--; // not through the middle of a character
     return s.slice(0, lo) + (note || '');
+  }
+
+  // A page as the parts Claude reads it in: whole lines, as many as fit in
+  // each. A page that fits in one result is one part.
+  function partsOf(text) {
+    if (jsonSize(text) <= RESULT) return [text];
+    const size = s => jsonSize(s) - 2;
+    const lines = text.split('\n');
+    const parts = [];
+    let cur = '', used = 0;
+    lines.forEach((l, i) => {
+      let line = i < lines.length - 1 ? l + '\n' : l;
+      let n = size(line);
+      if (cur && used + n > PART) { parts.push(cur); cur = ''; used = 0; }
+      while (n > PART) { // a single line longer than a part
+        const head = capJson(line, PART + 2);
+        parts.push(head);
+        line = line.slice(head.length);
+        n = size(line);
+      }
+      cur += line;
+      used += n;
+    });
+    if (cur) parts.push(cur);
+    return parts;
+  }
+
+  // One line per part saying what it holds: its headings or, where it has
+  // none, how it starts. This is how Claude picks the parts a question needs.
+  function outlineOf(parts) {
+    let code = false;
+    const lines = parts.map((p, i) => {
+      const heads = [];
+      let first = '';
+      p.split('\n').forEach(l => {
+        if (/^\s*(```|~~~)/.test(l)) { code = !code; return; }
+        const m = !code && /^\s*#{1,6}\s+(.+?)\s*$/.exec(l);
+        if (m) heads.push(clip(m[1].replace(/\s*\{[^{}]*\}$/, ''), 50));
+        else if (!first && l.trim() && !/^\s*</.test(l)) first = clip(l.trim(), 60);
+      });
+      const what = heads.length ? heads.slice(0, 6).join('; ') + (heads.length > 6 ? `; and ${heads.length - 6} more headings` : '')
+        : first ? `no headings, starts “${first}”` : 'no headings';
+      return `part ${i + 1}: ${what}`;
+    });
+    return capJson(lines.join('\n'), OUTLINE, '…');
+  }
+
+  // [1, 2, 3, 5] -> "parts 1–3, 5"
+  function partSpan(ks) {
+    const runs = [];
+    ks.forEach(k => {
+      const last = runs[runs.length - 1];
+      if (last && last[1] === k - 1) last[1] = k; else runs.push([k, k]);
+    });
+    return (ks.length === 1 ? 'part ' : 'parts ') + runs.map(([a, b]) => (a === b ? a : `${a}–${b}`)).join(', ');
   }
 
   function resultText(r) {
@@ -186,7 +259,27 @@ const LLM = (() => {
     return 'Notion could not be reached just now (' + (code || 'unknown') + '). Answer without it and say so.';
   }
 
-  function notionTools(sources, note) {
+  // `room` is how many bytes of pages this answer may read.
+  function notionTools(sources, note, room) {
+    // The pages read for this answer. A page is fetched once, however many
+    // of its parts are asked for, so that the parts stay those of one text.
+    const pages = new Map(); // id -> { src, got: its parts, read: part -> text, busy, told }
+    let spent = 0;
+
+    // What travels on with the answer: the start of what was read and, for
+    // a page in parts, which parts those were and what the others hold.
+    const carried = (p, parts) => {
+      const ks = [...p.read.keys()].sort((a, b) => a - b);
+      const text = ks.map((k, i) => (i && ks[i - 1] !== k - 1 ? '\n[…]\n' : '') + p.read.get(k)).join('');
+      if (parts.length === 1) return capJson(text, CARRY, '\n[The rest of this page was left out.]');
+      p.src.parts = ks;
+      p.src.of = parts.length;
+      const which = ks.length === parts.length ? 'All of them were' : `Only ${partSpan(ks)} of ${parts.length} ${ks.length === 1 ? 'was' : 'were'}`;
+      return `[This page is long and comes in ${parts.length} parts. ${which} read for this answer, and what follows is the start of that.]\n`
+        + `[What each part holds:\n${outlineOf(parts)}]\n`
+        + capJson(text, CARRY, '\n[The rest of what was read was left out.]');
+    };
+
     const call = async (tool, input, signal) => {
       try { return await rt.mcp.callTool('Notion', tool, input, signal ? { signal } : undefined); }
       catch (e) { throw new Error(mcpMessage(e)); }
@@ -219,19 +312,73 @@ const LLM = (() => {
       },
       {
         name: 'notion_fetch',
-        description: 'Read one Notion page or database, given its URL or ID (from notion_search, or from the person\'s message). Returns the page content as Markdown.',
-        inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'The Notion page URL or ID' } }, required: ['id'] },
+        description: 'Read one Notion page or database, given its URL or ID (from notion_search, or from the person\'s message). Returns the page content as Markdown. A long page comes in numbered parts: the first call returns part 1 and says how many parts there are and what each holds, and "part" reads another one. Several parts may be asked for at once.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'The Notion page URL or ID' },
+            part: { type: 'integer', description: 'Which part of a long page to read. Leave out for the first part.' },
+          },
+          required: ['id'],
+        },
         async execute(input, ctx) {
           const id = String((input && input.id) || '').trim();
           if (!id) throw new Error('A page URL or ID is required.');
-          const src = { kind: 'page', id, state: 'running', title: '', url: '', text: '' };
-          return track(src, async () => {
-            const r = await call('notion-fetch', { id }, ctx && ctx.signal);
-            const text = resultText(r);
-            Object.assign(src, pageMeta(r, text, id));
-            src.text = capJson(text, 12000, '\n[The rest of this page was left out.]');
-            return capJson(text, 30000, '\n[The rest of this page was too long to include.]');
-          });
+          const k = input && input.part != null ? Math.floor(Number(input.part)) : 1;
+          let p = pages.get(id);
+          if (!p) {
+            p = { src: { kind: 'page', id, state: 'running', title: '', url: '', text: '' }, read: new Map(), busy: 0, told: false };
+            p.got = call('notion-fetch', { id }, ctx && ctx.signal).then(r => {
+              const text = resultText(r);
+              Object.assign(p.src, pageMeta(r, text, id));
+              return partsOf(text);
+            });
+            pages.set(id, p);
+            sources.push(p.src);
+          }
+          const src = p.src;
+          p.busy++;
+          src.state = 'running';
+          note();
+          let parts;
+          try {
+            parts = await p.got;
+          } catch (e) {
+            // Let a second try at this page fetch it again.
+            pages.delete(id);
+            src.state = 'error';
+            src.error = e.message;
+            note();
+            throw e;
+          }
+          const n = parts.length;
+          try {
+            if (!(k >= 1 && k <= n)) throw new Error(n > 1 ? `This page has parts 1 to ${n}.` : 'This page is short and has no parts. Leave "part" out.');
+            const body = parts[k - 1];
+            if (!p.read.has(k)) {
+              if (spent && spent + bytes(body) > room) throw new Error('No more can be read for this one answer. Answer from what you have read, and tell the person which parts you did not read, so that they can ask about those next.');
+              spent += bytes(body);
+              p.read.set(k, body);
+              src.text = carried(p, parts);
+            }
+            if (n === 1) return capJson(body, RESULT, '\n[The rest of this page was too long to include.]');
+            const name = src.title ? ` of “${clip(src.title, 80)}”` : '';
+            let head = `[Part ${k} of ${n}${name}.]\n`;
+            if (!p.told) {
+              p.told = true;
+              head = `[Part ${k} of ${n}${name}. The page is too long to read at once, so it comes in parts. Before you answer, read the parts the question needs: call notion_fetch again with the same id and "part". You may ask for several parts at once. If you answer without having read every part, say which parts you did not read.]\n`
+                + `[What each part holds:\n${outlineOf(parts)}]\n`;
+            }
+            return capJson(head + body, RESULT) + `\n[End of part ${k} of ${n}.]`;
+          } catch (e) {
+            if (!p.read.size) src.error = e.message;
+            throw e;
+          } finally {
+            p.busy--;
+            if (!p.busy) src.state = p.read.size ? 'done' : 'error';
+            if (src.state === 'done') delete src.error;
+            note();
+          }
         },
       },
     ];
@@ -244,7 +391,10 @@ const LLM = (() => {
     return sources.map(s => {
       if (s.kind === 'search') return { kind: 'search', query: s.query, hits: s.hits, state: s.state, error: s.error };
       const text = s.state === 'done' && pages++ < 3 ? s.text : '';
-      return { kind: 'page', title: s.title, url: s.url, state: s.state, error: s.error, text };
+      const page = { kind: 'page', title: s.title, url: s.url, state: s.state, error: s.error, text };
+      // A page that came in parts says which of them were read.
+      if (s.of > 1) Object.assign(page, { parts: s.parts, of: s.of });
+      return page;
     });
   }
 
@@ -262,10 +412,15 @@ const LLM = (() => {
     if (tier) opts.modelTier = tier;
     if (o.effort) opts.effort = o.effort;
     let notion = !!(o.notion && rt.notion);
-    if (notion) opts.tools = notionTools(sources, () => { if (o.onTool) o.onTool(sources.slice()); });
+    const turns = turnsFor({ ...o, notion });
+    if (notion) {
+      // Pages may fill what the thread leaves of the largest prompt, within limits.
+      const left = ((rt.limits && rt.limits.maxPromptBytes) || 262144) - turns.reduce((a, t) => a + bytes(t.content), 0);
+      opts.tools = notionTools(sources, () => { if (o.onTool) o.onTool(sources.slice()); }, Math.max(READ_LEAST, Math.min(READ, left)));
+    }
     let res;
     try {
-      res = await rt.sample(turnsFor({ ...o, notion }), opts);
+      res = await rt.sample(turns, opts);
     } catch (e) {
       const code = e && e.code;
       if (code === 'not_granted') { rt.denied = true; changed(); }
@@ -358,7 +513,7 @@ const LLM = (() => {
   return {
     SEP, VERBS, rt, ready,
     onChange(fn) { changed = fn; },
-    ask, side, parse,
+    ask, side, parse, partSpan,
     passagePrompt, askPrompt, partPrompt, formulaPrompt, symbolPrompt, termPrompt, followPrompt, backPrompt, DRAW,
     errorText, isFinal: code => FINAL.has(code),
   };

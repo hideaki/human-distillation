@@ -1,10 +1,11 @@
 # Testing
 
-Three layers. The first two need nothing installed.
+Four layers. The first three need nothing installed.
 
 | Layer | What it checks | How to run it |
 | --- | --- | --- |
 | Parsing tests | How the text Claude writes is read: paragraphs, lists, code, diagrams, formulas, money, the `@@@` trailer | `npm test` |
+| Notion tests | How a Notion page is handed to Claude: a long one in parts, what one answer may read, what travels to the next question | `npm test` |
 | Static check | A name that hides an outer name, a name used before it is defined | `npm test` (needs an ESLint, see below) |
 | Flow tests | The real page, clicked through against the stand-in for Claude | open `/test` in the Browser pane |
 
@@ -19,8 +20,9 @@ nothing reminds you: a publish without them is unchecked.
 npm test
 ```
 
-This is `node live/test/run.js`. It runs the parsing tests, then the static
-check, and prints a summary. It exits with an error if either fails.
+This is `node live/test/run.js`. It runs the parsing tests, the Notion tests,
+then the static check, and prints a summary. It exits with an error if any
+fails.
 
 ## Parsing tests
 
@@ -37,6 +39,19 @@ functions of `app.js` (`blocks`, `runs`, `pieces`, `clip`, `parseGraph`,
 evaluates them alone. The app has no export that exists only for tests. If a
 function is renamed, the test stops with a message that names it; update the
 list at the top of `parse.test.js`.
+
+## Notion tests
+
+```bash
+node --test live/test/notion.test.js
+```
+
+`live/test/notion.test.js` runs `llm.js` whole against a small stand-in for
+the runtime: its `sample` plays Claude by calling the page's `notion_fetch` as
+each test says, and its `mcp` returns the pages the test gives it. It checks
+that a long page comes in parts that each fit a tool result and together are
+the whole page, the list of what each part holds, the limit on what one answer
+reads, and what is kept with the answer for later questions.
 
 ## Static check
 
@@ -141,6 +156,7 @@ end of the grid section then runs every pair.
 ## Files
 
     live/test/parse.test.js   the parsing tests
+    live/test/notion.test.js  the Notion tests
     live/test/extract.js      gets the app's pure functions into Node
     live/test/eslintrc.json   the two rules of the static check
     live/test/run.js          the one command (npm test)

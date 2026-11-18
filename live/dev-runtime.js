@@ -10,6 +10,8 @@
 //   #long     write a much longer answer
 //   #math     formulas of every kind, including ones that should not be drawn
 //   notion    use the Notion tools, when the page offers them
+//   #parts    with notion: the page read is a long one, and all its parts are read
+//   #skim     with notion: the page read is a long one, and only its first part is read
 
 (() => {
   'use strict';
@@ -143,8 +145,17 @@
         const found = await tool('notion_search').execute({ query: last.replace(/#\w+/g, '').replace(/\s+/g, ' ').trim().split(' ').slice(0, 4).join(' ') }, ctx);
         const first = found && found.results && found.results[0];
         if (first) {
-          const page = await tool('notion_fetch').execute({ id: /missing/i.test(last) ? 'missing-page' : first.url }, ctx);
-          notes.push('“' + first.title + '” (' + String(page).length + ' characters)');
+          const long = /#parts|#skim/.test(last);
+          const id = /missing/i.test(last) ? 'missing-page' : long ? 'https://www.notion.so/placeholder-long' : first.url;
+          const page = String(await tool('notion_fetch').execute({ id }, ctx));
+          // A long page says how many parts it has. Read the rest in one
+          // round, as Claude does.
+          const count = Number((/^\[Part 1 of (\d+)/.exec(page) || [])[1] || 1);
+          const rest = count > 1 && /#parts/.test(last)
+            ? await Promise.all(Array.from({ length: count - 1 }, (_, i) => tool('notion_fetch').execute({ id, part: i + 2 }, ctx)))
+            : [];
+          const size = [page, ...rest].reduce((a, s) => a + String(s).length, 0);
+          notes.push('“' + first.title + '” (' + (count > 1 ? `${rest.length + 1} of ${count} parts, ` : '') + size + ' characters)');
         }
       } catch (e) {
         notes.push('nothing, because a lookup failed (' + ((e && e.message) || 'unknown') + ')');
@@ -192,6 +203,17 @@
       }
       if (tool === 'notion-fetch') {
         if (/missing/.test(input.id)) throw { code: 'tool_error', server, message: 'Could not find a page with that ID.' };
+        if (/placeholder-long/.test(input.id)) {
+          // About 70 KB, much of it Japanese (three bytes a character): more
+          // than one tool result may carry, so the page reads it in parts.
+          const section = i => `## Section ${i}: 定常作業 ${i}\n\n` + `これは長いNotionページの代わりの文章です。 Filler sentence of section ${i}.\n\n`.repeat(60);
+          const long = {
+            title: 'Placeholder long page',
+            url: 'https://www.notion.so/placeholder-long',
+            text: '# Placeholder long page\n\n' + Array.from({ length: 12 }, (_, i) => section(i + 1)).join(''),
+          };
+          return { content: [{ type: 'text', text: JSON.stringify(long) }], payload: long };
+        }
         const payload = {
           title: 'Placeholder page 1',
           url: 'https://www.notion.so/placeholder-1',

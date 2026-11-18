@@ -43,9 +43,10 @@ function fromApp(names) {
   return new Function(body)();
 }
 
-// The LLM object of llm.js, as it is when no Claude is reachable.
-function llm() {
-  return new Function('window', 'TextEncoder', read('llm.js') + '\nreturn LLM;')({}, TextEncoder);
+// The LLM object of llm.js. With no argument it is as it is when no Claude is
+// reachable; `win` stands for a window that has one (`win.claude`).
+function llm(win) {
+  return new Function('window', 'TextEncoder', read('llm.js') + '\nreturn LLM;')(win || {}, TextEncoder);
 }
 
 module.exports = { fromApp, llm, read };

@@ -32,8 +32,10 @@ code.
   `.claude/launch.json`. Port 4174. `/` is the page with the stand-in, `/built`
   the built file, `/test` the flow tests.
 - The stand-in answers with placeholder text. Words in a question steer it:
-  `#math`, `#slow`, `#long`, `#error`, `#refuse`, `#deny`, and "notion".
-- Tests: `npm test` runs the parsing tests and the static check. The flow
+  `#math`, `#slow`, `#long`, `#error`, `#refuse`, `#deny`, and "notion"
+  (with `#parts` or `#skim` for a long page, read whole or only its start).
+- Tests: `npm test` runs the parsing tests, the Notion tests and the static
+  check. The flow
   tests run in the Browser pane at `/test`. `live/TESTING.md` explains all
   three, including the grid (every per-thread action in every kind of thread).
 - Publish: the app lives as a private Claude artifact at
@@ -59,6 +61,14 @@ uses the user's existing connections with no sign-in of its own.
   `@@@` followed by `term: <term> = <definition>` and `next: <question>` lines.
   Formulas are LaTeX: `$...$` in a sentence, `$$...$$` on a line of its own.
 - The model is chosen by tier (Fast, Balanced, Deep), not by name.
+- Claude reads Notion through two functions the page lends it for one
+  question, `notion_search` and `notion_fetch`. The page makes the connector
+  call itself and hands the result back, and what it hands back may be 32 KB
+  at most. So a longer page goes in numbered parts (`partsOf`): the first
+  result says how many there are and what each holds, and Claude asks for the
+  others with `part`. One answer reads 180 KB of pages at most, less in a long
+  thread. The answer keeps which parts were read (`parts`, `of` on the
+  source), and the start of them travels to later questions.
 
 ## How the page is put together
 

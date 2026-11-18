@@ -1244,6 +1244,34 @@
     same(n.sources.map(s => [s.kind, s.state]), [['search', 'done'], ['page', 'done']], 'The sources kept with the answer');
   });
 
+  test('Notion', 'a long page is read in parts, and the source says so when some were left unread', async () => {
+    await given('main');
+    await click($('.composer .toggle input', pane('root')), 'the "Look in my Notion" box');
+    const page = id => $(`.turn[data-node="${id}"] .sources a.src`);
+
+    const all = await sendIn('root', 'Read the handover in my notion #parts');
+    let n = await answered(all);
+    await drawn();
+    const whole = n.sources[1];
+    ok(whole.of > 1 && whole.parts.length === whole.of, `Every part was read (${JSON.stringify(whole.parts)} of ${whole.of})`);
+    has(txt(answerText(all)), `(${whole.of} of ${whole.of} parts, `, 'The answer');
+    eq(txt(page(all)), 'Placeholder long page', 'The source, with every part read');
+    eq($$(`.turn[data-node="${all}"] .sources .src`).length, 2, 'One search and one page, however many parts');
+
+    const some = await sendIn(all, 'Only the start of it in my notion #skim');
+    n = await answered(some);
+    await drawn();
+    same(n.sources[1].parts, [1], 'The parts read');
+    eq(txt(page(some)), `Placeholder long page (part 1 of ${whole.of})`, 'The source, with parts left unread');
+
+    const next = await sendIn(some, 'And what follows from that?');
+    await answered(next);
+    const sent = lastCall().turns.map(x => x.content).join('\n');
+    has(sent, `[This page is long and comes in ${whole.of} parts. All of them were read for this answer`, 'What the next question carries of the first page');
+    has(sent, `Only part 1 of ${whole.of} was read for this answer`, 'What it carries of the second');
+    has(sent, 'part 1: Placeholder long page; Section 1: 定常作業 1', 'The list of what each part holds');
+  });
+
   test('Conversations', 'new, switch and delete', async () => {
     await load();
     await askFirst('A first topic');

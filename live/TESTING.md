@@ -130,6 +130,9 @@ action that every thread offers is run once in each kind of thread:
 | Write-up | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 The main thread has no "Got it"; its cell checks that the button is absent.
+The "Check" cell writes an explanation in the message box, sends it, and then
+treats the check as the ordinary turn it is: it answers it, asks about a
+sentence of it, and looks for it in the map and the write-up.
 
 **When you add an action that every thread has, add it to `ACTIONS` in
 `flow.js`. When you add a kind of thread, add it to `KINDS`.** The loop at the

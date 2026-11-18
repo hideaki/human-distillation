@@ -33,6 +33,8 @@ const LLM = (() => {
   const DRAW = 'Show what you just explained as a diagram, with a sentence or two around it.';
   const termPrompt = term => `About this term in your answer: "${term}"\n\nWhat does it mean here, and why does it matter for this topic?`;
   const followPrompt = (text, verb) => `Still about the part I pointed at ("${clip(text, 200)}"): ${VERBS[verb].ask}`;
+  // "Explain it back": the reader's own account of a thread, to be checked.
+  const backPrompt = (subject, text) => `I will now explain ${subject} back in my own words, so that you can check my understanding. Compare it with what you told me above. Reply in three short paragraphs, each starting with its label in bold: "**Right:**" for what I have right, "**Off or missing:**" for what is wrong or missing (or "nothing important"), and "**Check yourself:**" for one question that tests my weakest point, which I may answer in my next message. Be specific and brief, with no diagram.\n\nMy explanation:\n${text}`;
   const PLAIN = `\n\n(For this reply only: plain text, with no ${SEP} section.)`;
 
   // ---------- runtime ----------
@@ -278,8 +280,8 @@ const LLM = (() => {
     return { raw: res.text, truncated: !!res.truncated, tier: res.modelTierApplied || null, sources: keep(sources) };
   }
 
-  // A side request about a thread (a takeaway, a check of the reader's own
-  // explanation): plain text back, nothing kept.
+  // A side request about a thread (its takeaway): plain text back, nothing
+  // kept.
   async function side(o) {
     const res = await ask({ ...o, prompt: o.prompt + PLAIN, notion: false, onText: o.onText ? raw => o.onText(parse(raw).text) : null });
     return parse(res.raw).text;
@@ -357,7 +359,7 @@ const LLM = (() => {
     SEP, VERBS, rt, ready,
     onChange(fn) { changed = fn; },
     ask, side, parse,
-    passagePrompt, askPrompt, partPrompt, formulaPrompt, symbolPrompt, termPrompt, followPrompt, DRAW,
+    passagePrompt, askPrompt, partPrompt, formulaPrompt, symbolPrompt, termPrompt, followPrompt, backPrompt, DRAW,
     errorText, isFinal: code => FINAL.has(code),
   };
 })();

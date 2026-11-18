@@ -56,7 +56,7 @@
   // later column starts at a turn attached to a passage in the column before.
 
   let store, state, prefs;
-  const ui = { pending: null, teachOpen: {}, teachResult: {}, focus: null, focusInput: null, glossPinned: false, confirmDel: null };
+  const ui = { pending: null, back: {}, shown: [], shownConv: null, places: {}, resizing: false, focus: null, focusInput: null, glossPinned: false, confirmDel: null };
   const live = {}; // answers being written: "<conversation>/<turn>" -> { ctl, sources }
 
   const N = id => state.nodes[id];
@@ -73,7 +73,7 @@
     return {
       id: 'c' + now.toString(36) + Math.random().toString(36).slice(2, 6),
       title: '', created: now, updated: now,
-      seq: 1, cols: [], tips: {}, looked: {}, teach: {}, nodes: {},
+      seq: 1, cols: [], tips: {}, looked: {}, nodes: {},
     };
   }
 
@@ -140,7 +140,7 @@
   function label(n) {
     if (!n.parent) return clip(n.q, 90);
     if (n.anchor) return n.anchor.sym ? '$' + n.anchor.sym + '$' : n.anchor.math || formulaOnly(n.anchor.text) ? clip(n.anchor.text, 46) : quote(n.anchor.text);
-    return clip(n.q, 52);
+    return n.back ? 'Explained back: ' + clip(n.q, 38) : clip(n.q, 52);
   }
 
   // ---------- storage ----------
@@ -158,7 +158,7 @@
       c.cols = Array.isArray(c.cols) ? c.cols : [];
       c.tips = c.tips || {};
       c.looked = c.looked || {};
-      c.teach = c.teach || {};
+      delete c.teach; // drafts of "Explain it back", from before it became a turn
       Object.values(c.nodes).forEach(n => {
         // An answer that was still being written when the page closed.
         if (busy(n)) {
@@ -186,7 +186,6 @@
       if (!saveWarned) { saveWarned = true; toast('This browser is not saving the conversation. It will be lost when the page closes.'); }
     }
   }
-  function saveSoon() { clearTimeout(saveT); saveT = setTimeout(save, 500); }
 
   // A worked example, so the first view shows what the page does without
   // spending anything. It is an ordinary conversation and can be continued.
@@ -1029,7 +1028,7 @@
       known: Object.keys(prefs.known),
       notion: !!n.notion,
       tier: prefs.tier,
-      effort: n.verb ? 'low' : null, // one-click questions about a passage should come back quickly
+      effort: n.verb || n.back ? 'low' : null, // one-click questions and checks should come back quickly
       signal: ctl.signal,
       onText: raw => { if (mine()) { n.raw = raw; n.phase = 'streaming'; paint(conv, id); } },
       onTool: list => { if (mine()) { job.sources = list; paint(conv, id); } },
@@ -1229,23 +1228,22 @@
     }, () => {});
   }
 
-  // "Explain it back": the reader writes the idea, Claude checks it against
-  // the thread.
-  function check(start, text) {
-    const id = start.id, conv = state;
-    if (text.trim().length < 12) { ui.teachResult[id] = { note: 'Write a sentence or two first.' }; paintTeach(id); return; }
-    const res = ui.teachResult[id] = { busy: true, text: '' };
-    const history = pathTo(tipOf(id)).map(x => conv.nodes[x]).filter(h => h.raw).map(h => ({ prompt: h.prompt, raw: h.raw, sources: h.sources }));
+  // "Explain it back": the reader writes the idea in their own words and
+  // Claude checks it against the thread. The check is a turn like any other,
+  // so it is kept, any part of it can be asked about, and the question it
+  // ends on can be answered in the next message.
+  function explainBack(ci, text) {
+    const col = state.cols[ci], start = N(col.start);
     const subject = start.anchor ? `the side thread about "${clip(about(start.anchor), 240)}"` : 'this whole conversation';
-    const mine = () => conv === state && ui.teachResult[id] === res;
-    LLM.side({
-      history,
-      prompt: `I will now explain ${subject} back in my own words, so that you can check my understanding. Compare it with what you told me above. Reply in three short parts, each on its own line and starting with its label: "Right:" for what I have right, "Off or missing:" for what is wrong or missing (or "nothing important"), and "Check yourself:" for one question that tests my weakest point. Be specific and brief.\n\nMy explanation:\n${text.trim()}`,
-      level: prefs.level, tier: prefs.tier, effort: 'low',
-      onText: t => { res.text = t; if (mine()) paintTeach(id); },
-    }).then(t => { res.text = t; }, e => { res.err = LLM.errorText(e && e.code); })
-      .finally(() => { res.busy = false; if (mine()) paintTeach(id); });
-    paintTeach(id);
+    ui.back[col.start] = false;
+    addTurn(ci, { q: text, back: true, prompt: LLM.backPrompt(subject, text) });
+  }
+
+  // Turn a message box into the box for an explanation, or back.
+  function setBack(key, on) {
+    ui.back[key] = on;
+    ui.focusInput = key;
+    renderPanes();
   }
 
   // ---------- conversations ----------
@@ -1254,8 +1252,7 @@
     if (!store.convs[id]) return;
     store.current = id;
     state = store.convs[id];
-    ui.teachOpen = {};
-    ui.teachResult = {};
+    ui.back = {};
     ui.confirmDel = null;
     document.body.classList.remove('side-open');
     render();
@@ -1336,20 +1333,29 @@
 
   function grow(ta) {
     ta.style.height = 'auto';
-    ta.style.height = Math.min(ta.scrollHeight + 2, 168) + 'px';
+    ta.style.height = Math.min(ta.scrollHeight + 2, ta.closest('.composer.back') ? 280 : 168) + 'px';
   }
 
   function renderPanes() {
     closePop();
     hideGloss();
     const host = $('#panes');
-    const scrolls = {}, drafts = {};
+    const scrolls = {}, drafts = {}, places = {};
     const act = document.activeElement;
-    const kept = act && host.contains(act) && /^(msg|teach)-/.test(act.id || '')
+    const kept = act && host.contains(act) && /^msg-/.test(act.id || '')
       ? { id: act.id, a: act.selectionStart, b: act.selectionEnd } : null;
+    // The threads that open or close in this redraw come first: the passage
+    // one of them hangs on is what the reader is looking at.
+    const threads = ui.shownConv === state.id ? [...state.cols.map(c => c.start).reverse(), ...ui.shown] : [];
     host.querySelectorAll('.pane').forEach(p => {
-      scrolls[p.dataset.start] = $('.body', p).scrollTop;
-      drafts[p.dataset.start] = $('.composer .msg', p).value;
+      const body = $('.body', p), key = p.dataset.start;
+      scrolls[key] = body.scrollTop;
+      drafts[key] = $('.composer .msg', p).value;
+      const noted = ui.places[key];
+      if (!noted || noted.conv !== state.id) return;
+      // After the window has changed size the text has wrapped again already,
+      // and only the place noted before that is of use.
+      places[key] = noted.w === body.clientWidth ? { w: noted.w, at: threadPlace(body, threads) || noted.at } : noted;
     });
     host.textContent = '';
 
@@ -1376,6 +1382,8 @@
         else body.scrollTop = t && t.previousElementSibling ? t.offsetTop - 12 : 0;
       } else if (scrolls[key] != null) {
         body.scrollTop = scrolls[key];
+        const was = places[key];
+        if (was && was.at && was.w !== body.clientWidth) restorePlace(body, was.at);
       }
       if (ui.focusInput === key) msg.focus({ preventScroll: true });
     });
@@ -1385,7 +1393,79 @@
     }
     ui.focus = null;
     ui.focusInput = null;
+    ui.shown = state.cols.map(c => c.start);
+    ui.shownConv = state.id;
+    ui.places = {};
+    notePlaces();
     host.scrollLeft = host.scrollWidth;
+  }
+
+  // ----- keeping the place -----
+  // A thread that opens or closes beside a pane changes the pane's width. Its
+  // text then wraps again, and the same scroll offset shows another part of
+  // it. The same happens when the window changes width. So a place in the
+  // text is put back at the height it had: the passage a thread hangs on, if
+  // one is in view, otherwise the block at the top edge and how far through
+  // it that edge is. That second kind is noted after every redraw and every
+  // scroll, because by the time the page hears that the window has changed
+  // width, the text has wrapped again.
+
+  // The top of what the thread `n` is attached to, if it is in this pane.
+  function anchorTop(body, n) {
+    const t = body.querySelector(`.text[data-node="${n.parent}"]`), a = n.anchor;
+    if (!t) return null;
+    if (a.part) {
+      const fig = t.querySelector(`.figure[data-fig="${a.fig}"]`);
+      const part = fig && fig.shadowRoot && [...fig.shadowRoot.querySelectorAll('.part')].find(e => e.dataset.part === a.part);
+      return part || fig ? (part || fig).getBoundingClientRect().top : null;
+    }
+    const r = offsetsToRange(t, a.start, Math.min(a.start + 1, t.textContent.length)).getClientRects()[0];
+    if (r && r.height) return r.top;
+    // A formula's source is not drawn: take the formula itself.
+    const formula = [...t.querySelectorAll('.math')].find(h => offs(t, h).start === a.start);
+    return formula ? formula.getBoundingClientRect().top : null;
+  }
+
+  function threadPlace(body, threads) {
+    const edge = body.getBoundingClientRect().top, end = edge + body.clientHeight;
+    for (const id of threads) {
+      const n = N(id);
+      if (!n || !n.anchor) continue;
+      const y = anchorTop(body, n);
+      if (y != null && y >= edge && y < end) return { thread: id, dy: y - edge };
+    }
+    return null;
+  }
+
+  function blockPlace(body) {
+    const edge = body.getBoundingClientRect().top;
+    for (const t of body.querySelectorAll('.text[data-node]')) {
+      for (let i = 0; i < t.children.length; i++) {
+        const r = t.children[i].getBoundingClientRect();
+        if (r.bottom > edge + 1) {
+          return { node: t.dataset.node, block: i, frac: r.height ? Math.max(0, edge - r.top) / r.height : 0, dy: Math.max(0, r.top - edge) };
+        }
+      }
+    }
+    return null;
+  }
+
+  function notePlace(body) {
+    ui.places[body.closest('.pane').dataset.start] = { conv: state.id, w: body.clientWidth, at: blockPlace(body) };
+  }
+  const notePlaces = () => document.querySelectorAll('#panes .pane .body').forEach(notePlace);
+
+  function restorePlace(body, at) {
+    const edge = body.getBoundingClientRect().top;
+    let y = null;
+    if (at.thread) {
+      const n = N(at.thread);
+      if (n && n.anchor) y = anchorTop(body, n);
+    } else {
+      const t = body.querySelector(`.text[data-node="${at.node}"]`), k = t && t.children[at.block];
+      if (k) { const r = k.getBoundingClientRect(); y = r.top + at.frac * r.height; }
+    }
+    if (y != null) body.scrollTop += y - edge - at.dy;
   }
 
   function spine(col, i) {
@@ -1441,7 +1521,7 @@
 
   function turn(n, ci, path, i) {
     return el('div.turn', { 'data-node': n.id },
-      el('div.user', {}, el('div.bubble', {}, rich(n.q))),
+      el('div.user', { class: n.back ? 'back' : '' }, n.back && el('div.tagline', {}, 'Explained back'), el('div.bubble', {}, rich(n.q))),
       answer(n, ci, path, i));
   }
 
@@ -1614,7 +1694,7 @@
     const taken = new Set(typedKids(leaf.id).map(k => k.q));
     LLM.parse(leaf.raw).next.filter(q => !taken.has(q)).slice(0, start.anchor ? 2 : 3)
       .forEach(q => out.push({ label: q, run: () => send(ci, q) }));
-    if (leaf.phase === 'done' && !/^\s*```graph/m.test(leaf.raw)) {
+    if (leaf.phase === 'done' && !leaf.back && !/^\s*```graph/m.test(leaf.raw)) {
       out.push({ label: 'Show this as a diagram', run: () => addTurn(ci, { q: 'Show this as a diagram', prompt: LLM.DRAW }) });
     }
     return out;
@@ -1625,14 +1705,16 @@
     const key = col ? col.start : 'new';
     const working = !!col && busy(N(col.leaf));
     const blocked = working || offline();
+    // While an explanation is being written, nothing that belongs to a question.
+    const back = !!col && !!ui.back[key];
 
     const row = el('div.chips');
-    if (!working) {
+    if (!working && !back) {
       chips(col, ci, path).forEach(c => row.append(el('button.chip', { type: 'button', disabled: offline(), on: { click: c.run } }, rich(c.label))));
     }
 
     const opts = el('div.opts');
-    if (LLM.rt.notion) {
+    if (LLM.rt.notion && !back) {
       const cb = el('input', { type: 'checkbox', id: 'notion-' + key });
       cb.checked = !!prefs.notion;
       cb.addEventListener('change', () => {
@@ -1645,12 +1727,12 @@
       }, cb, el('span', {}, 'Look in my Notion')));
     }
     opts.append(el('span.grow'));
-    if (col && path.some(id => N(id).raw)) {
+    if (col && !back && path.some(id => N(id).raw)) {
       opts.append(el('button.linkbtn.teachbtn', {
         type: 'button',
         title: 'Write the idea in your own words and have Claude check it',
-        on: { click: () => { ui.teachOpen[key] = !ui.teachOpen[key]; renderPanes(); } },
-      }, ui.teachOpen[key] ? 'Hide' : 'Explain it back'));
+        on: { click: () => setBack(key, true) },
+      }, 'Explain it back'));
     }
     return { row, opts, blocked };
   }
@@ -1660,27 +1742,42 @@
     const start = col && N(col.start);
     const atEnd = !col || !typedKids(col.leaf).length;
     const parts = composerParts(col, ci, path);
-    const f = el('footer.composer');
-    if (col && ui.teachOpen[key]) f.append(teach(start));
+    // The same box takes a question or, after "Explain it back", the reader's
+    // own explanation. What is typed in it stays when it changes over.
+    const back = !!col && !!ui.back[key];
+    const f = el('footer.composer', { class: back ? 'back' : '' });
+    const bar = back && el('div.backbar', {},
+      el('span.tag', {}, 'Explaining it back',
+        el('button', { type: 'button', title: 'Back to asking a question (Esc)', 'aria-label': 'Back to asking a question', on: { click: () => setBack(key, false) } }, '×')),
+      el('span.hint', {}, start.parent
+        ? 'Write what this thread told you. Claude checks it against the thread and points at the gaps.'
+        : 'Write the whole idea in a few sentences. Claude checks it against the conversation and points at the gaps.'));
 
     const msg = el('textarea.msg', {
-      id: 'msg-' + key, rows: '1', 'aria-label': 'Your question',
-      placeholder: !col ? 'Ask anything…' : !atEnd ? 'Continue from this point…' : start.anchor ? (start.anchor.part ? 'Ask more about this part of the diagram…' : start.anchor.sym ? 'Ask more about this symbol…' : start.anchor.math ? 'Ask more about this formula…' : 'Ask more about this passage…') : 'Ask a follow-up…',
+      id: 'msg-' + key, rows: '1', 'aria-label': back ? 'Your explanation' : 'Your question',
+      placeholder: back ? 'In your own words…' : !col ? 'Ask anything…' : !atEnd ? 'Continue from this point…' : start.anchor ? (start.anchor.part ? 'Ask more about this part of the diagram…' : start.anchor.sym ? 'Ask more about this symbol…' : start.anchor.math ? 'Ask more about this formula…' : 'Ask more about this passage…') : 'Ask a follow-up…',
     });
-    const form = el('form', {}, msg, el('button.btn.primary.send', { type: 'submit', disabled: parts.blocked }, 'Send'));
+    const form = el('form', {}, msg, el('button.btn.primary.send', {
+      type: 'submit', disabled: parts.blocked, title: back ? 'Have Claude check it (⌘ or Ctrl + Enter)' : null,
+    }, back ? 'Check' : 'Send'));
     const submit = () => {
       const now = col ? busy(N(col.leaf)) : false;
       const v = msg.value.trim();
       if (!v || now || offline()) return;
+      if (back && v.length < 12) { toast('Write a sentence or two first.'); return; }
       msg.value = '';
-      if (col) send(ci, v); else startConv(v);
+      if (back) explainBack(ci, v); else if (col) send(ci, v); else startConv(v);
     };
     form.addEventListener('submit', ev => { ev.preventDefault(); submit(); });
     msg.addEventListener('keydown', ev => {
+      if (back && ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); setBack(key, false); return; }
       // Enter sends, Shift+Enter breaks the line; never while an input method is composing.
-      if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing && ev.keyCode !== 229) { ev.preventDefault(); submit(); }
+      // An explanation runs to several lines, so there Enter breaks the line
+      // and it takes ⌘ or Ctrl with Enter, or the button, to send.
+      if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229 && (back ? ev.metaKey || ev.ctrlKey : !ev.shiftKey)) { ev.preventDefault(); submit(); }
     });
     msg.addEventListener('input', () => grow(msg));
+    if (bar) f.append(bar);
     f.append(parts.row, form, parts.opts);
     return f;
   }
@@ -1698,43 +1795,6 @@
       $('.composer .opts', p).replaceWith(parts.opts);
       $('.composer .send', p).disabled = parts.blocked;
     });
-  }
-
-  function teach(start) {
-    const id = start.id;
-    const ta = el('textarea', { id: 'teach-' + id, placeholder: 'In your own words…', 'aria-label': 'Your explanation' });
-    ta.value = state.teach[id] || '';
-    ta.addEventListener('input', () => { state.teach[id] = ta.value; saveSoon(); });
-    const out = el('div.result', { 'data-teach': id });
-    const btn = el('button.btn.check', { type: 'button', on: { click: () => check(start, ta.value) } }, 'Check');
-    const box = el('div.teach', { 'data-teach-box': id },
-      el('div.hint', {}, start.parent
-        ? 'Write what this thread told you. Claude compares it with the thread and points at the gaps.'
-        : 'Write the whole idea in a few sentences. Claude compares it with the conversation and points at the gaps.'),
-      ta, el('div.acts', {}, btn), out);
-    fillTeach(box, ui.teachResult[id]);
-    return box;
-  }
-
-  function fillTeach(box, res) {
-    const out = $('.result', box);
-    out.textContent = '';
-    $('.check', box).disabled = !!(res && res.busy) || offline();
-    if (!res) return;
-    if (res.note) { out.append(el('div.fine', {}, res.note)); return; }
-    if (res.text) {
-      // Each labelled part on its own line, with the label set off.
-      const t = el('div.text.static');
-      renderBlocks(t, res.text.replace(/\n+/g, '\n\n').replace(/^(Right|Off or missing|Check yourself):/gm, '**$1:**'), false);
-      out.append(t);
-    }
-    if (res.busy) out.append(el('div.working', { role: 'status' }, el('span.dots', { 'aria-hidden': 'true' }, el('i'), el('i'), el('i')), el('span', {}, res.text ? 'Writing…' : 'Reading your explanation…')));
-    if (res.err) out.append(el('div.errbox', {}, res.err));
-  }
-
-  function paintTeach(id) {
-    const box = $(`#panes .teach[data-teach-box="${id}"]`);
-    if (box) fillTeach(box, ui.teachResult[id]);
   }
 
   // ---------- sidebar ----------
@@ -1995,7 +2055,8 @@
     const n = N(id);
     if (n.parent) {
       if (n.anchor) host.append(el('div.danchor', {}, anchorKids(n.anchor, 120)));
-      host.append(el('div.dq', {}, rich(n.q)));
+      if (n.back) host.append(el('div.dq', {}, 'My explanation'), el('div.dmine', {}, rich(n.q)));
+      else host.append(el('div.dq', {}, rich(n.q)));
     }
     if (n.raw) {
       const t = buildText(n, true);
@@ -2024,7 +2085,7 @@
   function outline(id, depth) {
     const n = N(id), pad = '> '.repeat(depth), out = [];
     if (n.parent) {
-      out.push(pad + (n.anchor ? `On “${clip(about(n.anchor), 160)}”: ` : '') + '**' + n.q.replace(/\s+/g, ' ') + '**', pad.trimEnd());
+      out.push(pad + (n.anchor ? `On “${clip(about(n.anchor), 160)}”: ` : '') + (n.back ? '**My explanation:** ' + n.q.replace(/\s+/g, ' ') : '**' + n.q.replace(/\s+/g, ' ') + '**'), pad.trimEnd());
     }
     if (n.raw) LLM.parse(n.raw).text.replace(/```graph\n([\s\S]*?)```/g, (m, spec) => toMermaid(spec)).split('\n').forEach(l => out.push((pad + l).trimEnd()));
     out.push('');
@@ -2126,6 +2187,9 @@
   $('#gloss').addEventListener('mouseleave', () => { if (!ui.glossPinned) glossHideT = setTimeout(hideGloss, 260); });
 
   document.addEventListener('scroll', ev => {
+    // Where each thread has been scrolled to, apart from what a window that
+    // is changing size does to it.
+    if (!ui.resizing && ev.target.classList && ev.target.classList.contains('body') && ev.target.closest('#panes .pane')) notePlace(ev.target);
     if (ev.target === $('#modal') || (ev.target.closest && ev.target.closest('.composer, #pop'))) return;
     closePop();
     if (glossEl) hideGloss();
@@ -2151,7 +2215,11 @@
 
   let resizeT = null;
   // Not while the ask menu is open: on a phone the keyboard opening is a resize.
-  addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { if (!ui.pending) renderPanes(); }, 120); });
+  addEventListener('resize', () => {
+    ui.resizing = true;
+    clearTimeout(resizeT);
+    resizeT = setTimeout(() => { ui.resizing = false; if (ui.pending) notePlaces(); else renderPanes(); }, 120);
+  });
 
   // ---------- start ----------
 

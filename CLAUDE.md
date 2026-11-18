@@ -70,6 +70,15 @@ uses the user's existing connections with no sign-in of its own.
   `{..., math: true, sym}` a symbol in a formula; `{..., fig, part}` a part of
   a diagram. `start` and `end` are character offsets into the answer's
   rendered `textContent`.
+- "Explain it back" is a turn like any other, with `back: true`. Its `q` is
+  the reader's explanation and its `prompt` wraps that in the request to check
+  it (`LLM.backPrompt`). The message box itself changes over to take it
+  (`ui.back`, per thread); there is no second box.
+- The threads on screen share the width of the window. A line of text stops
+  at `--measure` (800px); the rest is margin (`--gut`, from the pane's width
+  as a container), which diagrams and display formulas may use. A pane that
+  changes width wraps its text again, so `renderPanes` puts a place in the
+  text back where it was (see "keeping the place" in `app.js`).
 - Diagrams and formulas are drawn inside shadow roots, so their drawn text
   stays out of those offsets. A formula's element also holds its LaTeX source
   as hidden text, so a formula does count in the offsets and travels with a
@@ -103,6 +112,10 @@ uses the user's existing connections with no sign-in of its own.
   is refused: put longer scripts in a file.
 - In the Browser pane, screenshots can lag and the viewport size resets
   between turns. Read the DOM in preference to a screenshot.
+- A page that is not on screen (the Browser pane hidden) gets no `resize`
+  event and hears of its scrolls late. The page notes where each thread is on
+  `scroll`, so a flow test that scrolls and then needs that note sends the
+  event itself.
 
 ## Working rules here
 

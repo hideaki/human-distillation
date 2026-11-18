@@ -23,6 +23,8 @@
   --read: "Source Serif 4", "Iowan Old Style", "Hiragino Mincho ProN", "Yu Mincho", Georgia, serif;
   --ui: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --measure: 800px;        /* the widest a line of an answer gets */
+  --pad: 24px;             /* the least room beside it */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -208,8 +210,9 @@ button.chip:hover:not(:disabled) { outline: 1px solid var(--faint); }
 /* ---------- threads ---------- */
 
 .pane {
-  flex: 0 1 580px;
+  flex: 1 1 0;
   min-width: 340px;
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -218,12 +221,16 @@ button.chip:hover:not(:disabled) { outline: 1px solid var(--faint); }
   border-radius: 12px;
   overflow: hidden;
 }
-.pane.empty { flex-basis: 640px; }
+/* The threads on screen share the whole width. A line of text stops at
+   --measure all the same: past that the room goes to the margins, and to the
+   diagrams and the formulas on a line of their own, which may use all of it. */
+.pane > * { --gut: max(var(--pad), calc((100cqw - var(--measure)) / 2)); }
+.pane .text[data-node] > .figure, .pane .text[data-node] > .math.display { margin-inline: calc(var(--pad) - var(--gut)); }
 .pane.fresh { animation: slide 0.18s ease-out; }
 @keyframes slide { from { opacity: 0; transform: translateX(14px); } }
 
 /* a thread attached to a passage shows that passage at the top */
-.pane > header { display: flex; gap: 10px; align-items: flex-start; padding: 14px 16px 12px 22px; border-bottom: 1px solid var(--line); }
+.pane > header { display: flex; gap: 10px; align-items: flex-start; padding: 14px max(16px, var(--gut) - 8px) 12px max(22px, var(--gut) - 2px); border-bottom: 1px solid var(--line); }
 .pane > header .from {
   flex: 1;
   min-width: 0;
@@ -240,7 +247,7 @@ button.chip:hover:not(:disabled) { outline: 1px solid var(--faint); }
 .icon { display: inline-grid; place-items: center; border: 0; background: transparent; width: 28px; height: 28px; border-radius: 7px; font-size: 16px; color: var(--muted); }
 .icon:hover { background: var(--chip); }
 
-.pane .body { flex: 1; overflow-y: auto; padding: 20px 24px 26px; position: relative; }
+.pane .body { flex: 1; overflow-y: auto; padding: 20px var(--gut) 26px; position: relative; }
 
 .intro { max-width: 34em; margin: 7vh auto 0; }
 .intro h1 { margin: 0 0 12px; font: 600 27px/1.2 var(--read); text-wrap: balance; }
@@ -254,6 +261,9 @@ button.chip:hover:not(:disabled) { outline: 1px solid var(--faint); }
 /* one turn: the question as a bubble, the answer as plain text */
 .turn + .turn { margin-top: 28px; }
 .user { display: flex; justify-content: flex-end; margin-bottom: 14px; }
+/* the reader's own explanation, sent to be checked */
+.user.back { flex-direction: column; justify-content: flex-start; align-items: flex-end; }
+.tagline { margin: 0 4px 4px 0; font-size: 11.5px; color: var(--muted); }
 .bubble { max-width: 86%; background: var(--chip); border-radius: 16px 16px 4px 16px; padding: 8px 14px; font-size: 15px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .text { font: 17px/1.66 var(--read); overflow-wrap: anywhere; }
@@ -332,7 +342,7 @@ mark.resolved.last::after { content: "✓"; color: var(--done-line); }
 .stub small { font-size: inherit; color: var(--faint); }
 
 /* message box */
-.composer { border-top: 1px solid var(--line); padding: 10px 14px; }
+.composer { border-top: 1px solid var(--line); padding: 10px max(14px, var(--gut) - 10px); }
 .composer .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 9px; }
 .composer .chips:empty { display: none; }
 .composer .chips button.chip { padding: 4px 11px; font-size: 12.5px; text-align: left; }
@@ -347,14 +357,13 @@ mark.resolved.last::after { content: "✓"; color: var(--done-line); }
 .toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .toggle input { margin: 0; accent-color: var(--accent); }
 
-.teach { margin-bottom: 12px; font-size: 13px; }
-.teach .hint { color: var(--muted); margin: 0 0 8px; }
-.teach textarea { display: block; width: 100%; min-height: 76px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--ink); padding: 9px 11px; font: 15px/1.5 var(--read); }
-.teach textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
-.teach .acts { margin-top: 8px; }
-.teach .result:not(:empty) { margin-top: 10px; max-height: 32vh; overflow-y: auto; }
-.teach .result .text { font-size: 15px; line-height: 1.55; }
-.teach .result .text p { margin-bottom: 0.6em; }
+/* the message box while it takes an explanation ("Explain it back") */
+.backbar { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; font-size: 12.5px; color: var(--muted); }
+.backbar .tag { flex: none; display: inline-flex; align-items: center; gap: 2px; background: var(--hl); color: var(--ink); border-radius: 999px; padding: 2px 4px 2px 10px; font-weight: 500; }
+.backbar .tag button { border: 0; background: transparent; width: 20px; height: 20px; border-radius: 50%; padding: 0; font-size: 14px; line-height: 1; color: inherit; }
+.backbar .tag button:hover { background: var(--hl-on); }
+.backbar .hint { flex: 1; min-width: 0; }
+.composer.back .msg { min-height: 92px; max-height: 280px; border-radius: 12px; }
 
 /* threads that no longer fit collapse to a strip */
 .spine { flex: 0 0 42px; border: 1px solid var(--line); background: var(--pane); border-radius: 12px; padding: 14px 0; writing-mode: vertical-rl; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
@@ -402,6 +411,7 @@ mark.resolved.last::after { content: "✓"; color: var(--done-line); }
 .dbranch .dbranch { margin-top: 10px; margin-bottom: 4px; }
 .dbranch.fork { border-left-color: var(--line); }
 .sheet > .dq { font-size: 12px; font-weight: 600; color: var(--accent); margin: 22px 0 4px; }
+.dmine { margin: 0 0 0.9em; padding-left: 12px; border-left: 3px solid var(--line); font: italic 16px/1.55 var(--read); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 .sheet ul.open { margin: 0; padding-left: 20px; }
 .sheet ul.open li { margin-bottom: 5px; }
 .sheet ul.open i { font-family: var(--read); color: var(--muted); }
@@ -426,7 +436,8 @@ mark.resolved.last::after { content: "✓"; color: var(--done-line); }
   body.side-open .scrim { display: block; position: fixed; inset: 0; z-index: 44; background: var(--scrim); }
   #panes { padding-block: 10px; padding-left: max(16px, env(safe-area-inset-left, 0px)); gap: 8px; justify-content: flex-start; }
   .pane { flex: 1 1 0; min-width: 0; }
-  .pane .body { padding: 16px 16px 20px; }
+  :root { --pad: 16px; }
+  .pane .body { padding-block: 16px 20px; }
   .pane > header { padding: 12px 10px 10px 14px; }
   .spine { flex-basis: 34px; }
   .text { font-size: 16px; }

@@ -28,11 +28,19 @@
     const depth = turns.filter(t => t.role === 'assistant').length;
 
     if (/no @@@ section/.test(last)) {
-      if (/^In one sentence/.test(q)) return 'Placeholder takeaway: the side thread settled the part you pointed at.';
+      return 'Placeholder takeaway: the side thread settled the part you pointed at.';
+    }
+
+    if (/^I will now explain .+ back in my own words/.test(q)) {
       return [
-        'Right: you named the main idea, which is the part the placeholder can see.',
-        'Off or missing: nothing can really be checked here, because this is the stand-in and not Claude.',
-        'Check yourself: could you explain it to someone who has never heard of it?',
+        '**Right:** you named the main idea, which is the part the placeholder can see.',
+        '',
+        '**Off or missing:** nothing can really be checked here, because this is the stand-in and not Claude.',
+        '',
+        '**Check yourself:** could you explain it to someone who has never heard of it?',
+        '',
+        '@@@',
+        'next: What did I leave out?',
       ].join('\n');
     }
 

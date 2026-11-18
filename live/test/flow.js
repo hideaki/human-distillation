@@ -1262,6 +1262,88 @@
     same(Object.keys(store().convs), ['example'], 'What is kept');
   });
 
+  // ----- the width of the window -----
+
+  const topOf = e => e.getBoundingClientRect().top;
+  const widthOf = e => e.getBoundingClientRect().width;
+  const near = (got, want, what) => ok(Math.abs(got - want) <= 2, `${what}: expected about ${Math.round(want)}px, got ${Math.round(got)}px`);
+
+  test('Width', 'one thread fills the window; a line of text stops at 800px, a diagram may be wider', async () => {
+    await given('main');
+    const room = $('#panes').clientWidth;
+    ok(room > 1000, `The test needs a wide window (${room}px for the threads)`);
+    near(widthOf(pane('root')), room - 32, 'The thread');
+    const line = widthOf($('p', mainText()));
+    ok(line <= 800 && line > 760, `A line of text is about 800px (${Math.round(line)}px)`);
+    ok(widthOf(figure(mainText())) > line + 100, `The diagram has more room than the text (${Math.round(widthOf(figure(mainText())))}px)`);
+    ok(widthOf(display(mainText())) > line + 100, 'So has a formula on a line of its own');
+    const box = $('.composer .msg', pane('root')).getBoundingClientRect(), text = $('p', mainText()).getBoundingClientRect();
+    ok(box.left >= text.left - 12 && box.right <= text.right + 12, 'The message box lines up with the text');
+    const body = $('.body', pane('root'));
+    ok(body.scrollWidth <= body.clientWidth + 1, 'Nothing makes the thread scroll sideways');
+    // Two threads share the width.
+    await click(sentence(mainText(), 'A real answer would open'), 'a sentence');
+    const id = await explain();
+    near(widthOf(pane('root')), widthOf(pane(id)), 'The two threads');
+    near(widthOf(pane('root')) + widthOf(pane(id)), room - 32 - 14, 'The two threads together');
+    noSideways('With two threads');
+  });
+
+  test('Width', 'the sentence asked about stays at the same height when its thread opens and closes', async () => {
+    await load();
+    await askFirst('Tell me more #long');
+    const body = () => $('.body', pane('root'));
+    // A sentence low in the view, with a good deal of text above it to wrap
+    // again. Nothing is scrolled to get to it: a scroll closes the menu, and
+    // a page that is not on screen hears of its scrolls late.
+    const low = $$('.sent', mainText()).filter(e => topOf(e) - topOf(body()) < body().clientHeight - 120).pop();
+    ok(low && topOf(low) - topOf(body()) > 250, 'There is a sentence well down the first view');
+    const starts = txt(low).slice(0, 30);
+    const s = () => sentence(mainText(), starts);
+    await click(s(), 'a sentence well down the answer');
+    await menu();
+    const at = topOf(s()) - topOf(body()), wide = widthOf(mainText());
+    const id = await explain();
+    const mark = () => $(`mark[data-node="${id}"]`, mainText());
+    ok(widthOf(mainText()) < wide - 100, `The answer is narrower with a thread beside it (${Math.round(widthOf(mainText()))}px, from ${Math.round(wide)}px)`);
+    near(topOf(mark()) - topOf(body()), at, 'Where the sentence is, with its thread open');
+    await click($('header button[aria-label="Close this thread"]', pane(id)), 'the × of the thread');
+    await until(() => !pane(id), 'the thread to close');
+    near(widthOf(mainText()), wide, 'The answer is as wide as before');
+    near(topOf(mark()) - topOf(body()), at, 'Where the sentence is, with its thread closed');
+    // "Got it" closes the thread too.
+    await click(mark(), 'the sentence');
+    await until(() => pane(id), 'the thread to open again');
+    near(topOf(mark()) - topOf(body()), at, 'Where the sentence is, with its thread open again');
+    await click(button(pane(id), 'Got it'), '"Got it"');
+    await until(() => !pane(id), 'the thread to fold away');
+    near(topOf(mark()) - topOf(body()), at, 'Where the sentence is, with its thread resolved');
+  });
+
+  test('Width', 'the paragraph at the top of the view stays there when the window changes width', async () => {
+    await load();
+    await askFirst('Tell me more #long');
+    const body = () => $('.body', pane('root'));
+    // The last paragraph that the thread can be scrolled to the top of.
+    const room = body().scrollHeight - body().clientHeight;
+    const k = $$('p', mainText()).map(e => topOf(e) - topOf(body()) - 10 <= room).lastIndexOf(true);
+    ok(k > 1, `The answer is long enough to scroll (paragraph ${k})`);
+    const para = () => $$('p', mainText())[k];
+    body().scrollTop += topOf(para()) - topOf(body()) - 10;
+    // The page notes where a thread is when it hears of a scroll. A page that
+    // is not on screen hears of it late, so tell it here as well.
+    body().dispatchEvent(new win.Event('scroll'));
+    await calm();
+    near(topOf(para()) - topOf(body()), 10, 'Where the paragraph is to begin with');
+    const wide = widthOf(mainText()), old = para();
+    frame.style.width = '1000px';
+    win.dispatchEvent(new win.Event('resize')); // as for the scroll above
+    // The text wraps again at once; the page puts the place back a moment
+    // later, when it draws the threads again.
+    await until(() => !old.isConnected && widthOf(mainText()) < wide - 50, 'the page to draw the thread again at the new width');
+    near(topOf(para()) - topOf(body()), 10, 'Where the paragraph is in the narrower window');
+  });
+
   // ----- a phone -----
 
   test('Phone', '375px wide: nothing makes the page scroll sideways', async () => {
@@ -1367,31 +1449,76 @@
       label: 'Check (Explain it back)',
       run: async kind => {
         await given(kind);
-        const id = lastStart();
-        const box = () => $(`.teach[data-teach-box="${id}"]`, pane(id));
-        await click(button(pane(id), 'Explain it back'), '"Explain it back"');
-        await until(box, 'the box to write in');
-        has(txt($('.hint', box())), kind === 'main' ? 'Write the whole idea in a few sentences.' : 'Write what this thread told you.', 'The hint');
-        type($('textarea', box()), 'Too short');
-        await click($('.check', box()), '"Check"');
-        eq(txt($('.result', box())), 'Write a sentence or two first.', 'With too little written');
+        const id = lastStart(), leaf = lastCol().leaf, turns = ids().size;
+        const box = () => $('.composer .msg', pane(id));
+        const sendBtn = () => $('.composer .send', pane(id));
+        const link = () => button($('.composer .opts', pane(id)), 'Explain it back');
+        const explaining = () => $('.composer.back', pane(id));
+        eq($$('.composer > *', pane(id)).length, $('.composer', pane(id)).childNodes.length, 'Nothing stray is written into the message box area');
+        // The message box itself changes over, and keeps what is typed in it.
+        type(box(), 'Too short');
+        await click(link(), '"Explain it back"');
+        await until(explaining, 'the box to change over');
+        same([box().value, box().placeholder, txt(sendBtn())], ['Too short', 'In your own words…', 'Check'], 'The box for an explanation');
+        has(txt($('.backbar .tag', pane(id))), 'Explaining it back', 'The tag on the box');
+        has(txt($('.backbar .hint', pane(id))), kind === 'main' ? 'Write the whole idea in a few sentences.' : 'Write what this thread told you.', 'The hint');
+        ok(!link() && !chipLabels(id).length, 'No question is offered while an explanation is written');
+        await click(sendBtn(), '"Check"');
+        has(toastText(), 'Write a sentence or two first.', 'With too little written');
         eq(calls().length, 0, 'Requests to Claude');
+        // Esc goes back to asking; so does the × on the tag.
+        key(box(), 'Escape');
+        await until(() => !explaining(), 'the box to change back');
+        same([box().value, box().placeholder, txt(sendBtn())], ['Too short', KINDS[kind].box, 'Send'], 'The box for a question');
+        await click(link(), '"Explain it back"');
+        await until(explaining, 'the box to change over');
+        await click($('.backbar .tag button', pane(id)), 'the × on the tag');
+        await until(() => !explaining() && link(), 'the box to change back');
+        await click(link(), '"Explain it back"');
+        await until(explaining, 'the box to change over');
+        // Enter breaks the line there; it takes Ctrl or ⌘ with it to send.
         const mine = 'A regression test checks that what worked before still works.';
-        type($('textarea', box()), mine);
-        await click($('.check', box()), '"Check"');
-        await until(() => $('.result .working', box()) || txt($('.result', box())).includes('Right:'), 'the check to start', 3000);
-        const out = await until(() => { const r = $('.result', box()); return !$('.working', r) && (txt(r).includes('Check yourself:') || $('.errbox', r)) && r; }, 'the check to come back', 30000);
-        ok(!$('.errbox', out), 'The check came back without an error: ' + txt($('.errbox', out)));
-        same($$('strong', out).map(txt), ['Right:', 'Off or missing:', 'Check yourself:'], 'The three parts of the reply');
-        ok(!$('.check', box()).disabled, '"Check" can be pressed again');
-        const call = lastCall();
-        has(call.prompt, kind === 'main' ? 'I will now explain this whole conversation back in my own words'
+        type(box(), mine);
+        key(box(), 'Enter');
+        await sleep(200);
+        same([calls().length, ids().size, box().value], [0, turns, mine], 'After Enter alone');
+        const before = ids();
+        key(box(), 'Enter', { ctrlKey: true });
+        const next = await fresh(before, 'the explanation to become a turn');
+        // It is a turn of the thread, kept like any other.
+        same([node(next).parent, node(next).q, node(next).back, node(next).anchor], [leaf, mine, true, null], 'The new turn');
+        has(node(next).prompt, kind === 'main' ? 'I will now explain this whole conversation back in my own words'
           : `I will now explain the side thread about "${KINDS[kind].about}" back in my own words`, 'The request names what is explained');
-        has(call.prompt, 'My explanation:\n' + mine, 'The request carries the explanation');
-        eq(call.turns.length, kind === 'main' ? 4 : 6, 'The request carries the thread');
-        await until(() => conv().teach[id] === mine, 'the explanation to be kept');
-        await click(button(pane(id), 'Hide'), '"Hide"');
-        ok(!box() && button(pane(id), 'Explain it back'), 'The box folds away');
+        has(node(next).prompt, 'My explanation:\n' + mine, 'The request carries the explanation');
+        const t = ok($(`.turn[data-node="${next}"]`, pane(id)), 'The explanation is in the thread it was written in');
+        same([txt($('.user.back .tagline', t)), txt($('.bubble', t))], ['Explained back', mine], 'How the explanation is shown');
+        ok(!explaining(), 'The box is for questions again');
+        eq(box().value, '', 'The message box is cleared');
+        const n = await answered(next);
+        await drawn();
+        eq(n.phase, 'done', 'The turn');
+        same($$('strong', answerText(next)).map(txt), ['Right:', 'Off or missing:', 'Check yourself:'], 'The three parts of the check');
+        eq(lastCall().prompt, node(next).prompt, 'The question sent');
+        eq(lastCall().turns.length, kind === 'main' ? 4 : 6, 'The turns sent');
+        same([lastCol().start, lastCol().leaf], [id, next], 'The column');
+        ok(chipLabels(id).includes('What did I leave out?'), 'The questions Claude suggests after the check are offered');
+        ok(!chipLabels(id).includes('Show this as a diagram'), 'A check is not offered as a diagram');
+        has(txt($('#tree')), 'Explained back: ' + mine.slice(0, 20), 'The map');
+        // The question the check ends on can be answered: the check travels with the reply.
+        const reply = await sendIn(id, 'Yes, I think I could.');
+        eq(node(reply).parent, next, 'The reply follows the check');
+        await answered(reply);
+        eq(lastCall().turns.length, (kind === 'main' ? 4 : 6) + 2, 'The turns sent with the reply');
+        has(lastCall().turns.map(x => x.content).join('\n'), '**Check yourself:**', 'The turns sent with the reply');
+        // And a sentence of the check can be asked about, as in any answer.
+        await drawn();
+        await click(sentence(answerText(next), 'Off or missing:'), 'a sentence of the check');
+        const side = await explain();
+        same([node(side).parent, node(side).anchor.text.slice(0, 15)], [next, 'Off or missing:'], 'The thread on the check');
+        // It is in the write-up as the reader's own words.
+        await click($('#writeup'), '"Write it up"');
+        const sheet = await until(() => $('#modal.show .sheet'), 'the write-up');
+        ok($$('.dmine', sheet).some(e => txt(e) === mine), 'The explanation is in the write-up');
       },
     },
     gotit: {

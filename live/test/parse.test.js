@@ -501,6 +501,13 @@ test('prompts: each kind of pointing names what was pointed at', () => {
   assert.match(LLM.followPrompt('a sentence.', 'why'), /^Still about the part I pointed at \("a sentence\."\): Why is this true\?/);
 });
 
+test('prompts: an explanation to be checked names what it explains, and comes last', () => {
+  const p = LLM.backPrompt('this whole conversation', 'It is X.\nBecause Y.');
+  assert.match(p, /^I will now explain this whole conversation back in my own words/);
+  assert.match(p, /"\*\*Right:\*\*".*"\*\*Off or missing:\*\*".*"\*\*Check yourself:\*\*"/);
+  assert.ok(p.endsWith('\n\nMy explanation:\nIt is X.\nBecause Y.'));
+});
+
 test('errors: every code has words for the reader, and the final ones are known', () => {
   for (const code of ['no_runtime', 'not_granted', 'refused', 'rate_limited', 'upstream_error', 'interrupted', undefined]) {
     assert.ok(LLM.errorText(code).length > 20, String(code));

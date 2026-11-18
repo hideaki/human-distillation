@@ -277,16 +277,16 @@
       if (mo) {
         // A formula set on its own: $$ ... $$ or \[ ... \], on one line or several.
         const close = mo[1] === '$$' ? '$$' : '\\]';
-        const buf = [];
+        const rows = [];
         let rest = l.trim().slice(mo[1].length), j = i, closed = false, tail = '';
         for (;;) {
           const k = rest.indexOf(close);
-          if (k >= 0) { buf.push(rest.slice(0, k)); tail = rest.slice(k + close.length).trim(); closed = true; break; }
-          buf.push(rest);
+          if (k >= 0) { rows.push(rest.slice(0, k)); tail = rest.slice(k + close.length).trim(); closed = true; break; }
+          rows.push(rest);
           if (++j >= lines.length || !lines[j].trim()) break;
           rest = lines[j];
         }
-        const tex = buf.join('\n').trim();
+        const tex = rows.join('\n').trim();
         if (closed && tex) {
           out.push({ type: 'math', tex, closed: true });
           i = j + 1;
@@ -301,12 +301,12 @@
       const f = fence(l);
       if (f) {
         const lang = l.trim().slice(f[1].length).trim().toLowerCase();
-        const buf = [];
+        const body = [];
         i++;
-        while (i < lines.length && !lines[i].trim().startsWith(f[1])) buf.push(lines[i++]);
+        while (i < lines.length && !lines[i].trim().startsWith(f[1])) body.push(lines[i++]);
         const closed = i < lines.length;
         i++;
-        out.push({ type: lang === 'graph' ? 'graph' : 'code', text: buf.join('\n'), closed });
+        out.push({ type: lang === 'graph' ? 'graph' : 'code', text: body.join('\n'), closed });
         continue;
       }
       if (item(l)) {
@@ -362,8 +362,8 @@
     const out = [];
     const add = (t, kind, href) => t.split(/(\d+)/).forEach(bit => {
       if (!bit) return;
-      const m = /^(\d+)$/.exec(bit);
-      if (m) out.push({ ...held[+m[1]], within: kind, href });
+      const kept = /^(\d+)$/.exec(bit);
+      if (kept) out.push({ ...held[+kept[1]], within: kind, href });
       else out.push({ t: bit, kind, href });
     });
     const re = /\*\*([^*]+?)\*\*|(?<![\w*])\*([^*\s](?:[^*]*?[^*\s])?)\*(?![\w*])|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
@@ -626,11 +626,11 @@
 
   // Tag the symbols in a freshly drawn formula. Returns how many there are.
   function markSyms(node, src, display) {
-    const m = new DOMParser().parseFromString(MathJax.tex2mml(src, { display }), 'application/xml').documentElement;
-    const g = node.querySelector('g[data-mml-node="math"]');
-    if (!g || m.localName !== 'math') return 0;
+    const mml = new DOMParser().parseFromString(MathJax.tex2mml(src, { display }), 'application/xml').documentElement;
+    const drawing = node.querySelector('g[data-mml-node="math"]');
+    if (!drawing || mml.localName !== 'math') return 0;
     // A formula that is one symbol has nothing smaller to point at.
-    let top = m;
+    let top = mml;
     while (top.children.length === 1 && /^(math|mrow|mstyle)$/.test(top.localName)) top = top.children[0];
     if (isSym(top)) return 0;
     let n = 0;
@@ -645,7 +645,7 @@
         return;
       }
       mk.forEach((c, i) => walk(c, gk[i]));
-    })(m, g);
+    })(mml, drawing);
     return n;
   }
 
@@ -747,10 +747,10 @@
   function parseGraph(spec) {
     const nodes = [], edges = [], ids = new Map();
     const node = raw => {
-      const label = raw.trim().replace(/^["'[(]+|["'\])]+$/g, '').replace(/\s+/g, ' ');
-      if (!label) return -1;
-      const key = label.toLowerCase();
-      if (!ids.has(key)) { ids.set(key, nodes.length); nodes.push({ label }); }
+      const text = raw.trim().replace(/^["'[(]+|["'\])]+$/g, '').replace(/\s+/g, ' ');
+      if (!text) return -1;
+      const key = text.toLowerCase();
+      if (!ids.has(key)) { ids.set(key, nodes.length); nodes.push({ label: text }); }
       return ids.get(key);
     };
     spec.split('\n').forEach(line => {
@@ -758,13 +758,13 @@
       if (!line || line.startsWith('%%') || /^(graph|flowchart|direction)\b/i.test(line)) return;
       const parts = line.split(ARROW); // [name, arrow, name, arrow, name, ...]
       if (parts.length < 3) { node(line); return; }
-      let label = '';
+      let said = '';
       const m = /^(.+?)\s*:\s+(.+)$/.exec(parts[parts.length - 1]);
-      if (m) { parts[parts.length - 1] = m[1]; label = m[2].trim(); }
+      if (m) { parts[parts.length - 1] = m[1]; said = m[2].trim(); }
       for (let k = 0; k + 2 < parts.length; k += 2) {
         const from = node(parts[k]), to = node(parts[k + 2]), arrow = parts[k + 1];
         if (from < 0 || to < 0 || from === to) continue;
-        edges.push({ from, to, label: k + 3 === parts.length ? label : '', both: /^<|↔/.test(arrow), plain: /^-+$/.test(arrow) });
+        edges.push({ from, to, label: k + 3 === parts.length ? said : '', both: /^<|↔/.test(arrow), plain: /^-+$/.test(arrow) });
       }
     });
     return { nodes: nodes.slice(0, 16), edges: edges.filter(e => e.from < 16 && e.to < 16).slice(0, 28) };
@@ -778,12 +778,12 @@
   const UI_FONT = 'Inter, -apple-system, "Segoe UI", "Hiragino Sans", system-ui, sans-serif';
   function textW(t, font) { meter.font = font; return meter.measureText(t).width; }
 
-  function wrapLabel(label, max) {
+  function wrapLabel(text, max) {
     const out = [];
     let cur = '';
     // Words where there are spaces; otherwise (Japanese, Chinese) a few characters at a time.
-    const bits = /\s/.test(label) ? label.split(' ') : label.match(/.{1,10}/gu) || [label];
-    const glue = /\s/.test(label) ? ' ' : '';
+    const bits = /\s/.test(text) ? text.split(' ') : text.match(/.{1,10}/gu) || [text];
+    const glue = /\s/.test(text) ? ' ' : '';
     bits.forEach(b => {
       if (cur && (cur + glue + b).length > max) { out.push(cur); cur = b; } else cur = cur ? cur + glue + b : b;
     });
@@ -860,7 +860,7 @@
     const W = Math.ceil(size.width), H = Math.ceil(size.height);
     const out = svg('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'img', 'aria-label': 'Diagram: ' + g.edges.map(e => edgeText(g, e)).join('; '), class: clickable ? 'can' : '' });
     const r1 = v => Math.round(v * 10) / 10;
-    const tip = (a, b) => { // an arrowhead at b, coming from a
+    const head = (a, b) => { // an arrowhead at b, coming from a
       const d = Math.hypot(b.x - a.x, b.y - a.y) || 1, ux = (b.x - a.x) / d, uy = (b.y - a.y) / d;
       return svg('polygon', { class: 'tip', points: [[b.x, b.y], [b.x - ux * 8 - uy * 4, b.y - uy * 8 + ux * 4], [b.x - ux * 8 + uy * 4, b.y - uy * 8 - ux * 4]].map(q => r1(q[0]) + ',' + r1(q[1])).join(' ') });
     };
@@ -888,8 +888,8 @@
       const ge = wire(edgePart(g, e), edgeText(g, e));
       ge.classList.add('edge');
       ge.append(svg('path', { class: 'line', d }), svg('path', { class: 'hit', d }));
-      if (!e.plain) ge.append(tip(pts[pts.length - 2], pts[pts.length - 1]));
-      if (e.both) ge.append(tip(pts[1], pts[0]));
+      if (!e.plain) ge.append(head(pts[pts.length - 2], pts[pts.length - 1]));
+      if (e.both) ge.append(head(pts[1], pts[0]));
       if (e.label && pos.x != null) {
         ge.append(svg('g', { class: 'lab' },
           svg('rect', { x: r1(pos.x - e.lw / 2), y: r1(pos.y - 9), width: e.lw, height: 18, rx: 4 }),
@@ -1253,7 +1253,7 @@
   }
 
   function newConversation() {
-    const empty = Object.values(store.convs).find(c => !c.nodes.root);
+    const empty = Object.values(store.convs).find(x => !x.nodes.root);
     const c = empty || blankConv();
     c.updated = Date.now();
     store.convs[c.id] = c;
@@ -2029,15 +2029,15 @@
     const sel = getSelection();
     if (sel && !sel.isCollapsed && sel.rangeCount) {
       const r = sel.getRangeAt(0);
-      const c = textHost(r.startContainer);
-      if (!c || c !== textHost(r.endContainer)) return;
-      let { start, end } = rangeOffsets(c, r);
-      const full = c.textContent;
+      const within = textHost(r.startContainer);
+      if (!within || within !== textHost(r.endContainer)) return;
+      let { start, end } = rangeOffsets(within, r);
+      const full = within.textContent;
       while (start < end && /\s/.test(full[start])) start++;
       while (end > start && /\s/.test(full[end - 1])) end--;
       if (end - start < 2) return;
       if (HAS_HL) sel.removeAllRanges();
-      openPopFor(c, start, end);
+      openPopFor(within, start, end);
       return;
     }
 

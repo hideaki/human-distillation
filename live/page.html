@@ -1,0 +1,65 @@
+<title>Human Distillation</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+<link rel="stylesheet" href="styles.css">
+
+<header class="top">
+  <button class="icon menu" id="menu" title="Conversations and map" aria-label="Conversations and map">☰</button>
+  <div class="brand">Human Distillation</div>
+  <div class="spacer"></div>
+  <div class="seg" id="reader" role="group" aria-label="Reader">
+    <span class="lbl">Reader</span>
+    <button data-level="1" title="Assume no background in the field and define more terms">New to this</button>
+    <button data-level="2" title="Skip the fundamentals and define only what is specific to the topic">Knows the basics</button>
+  </div>
+  <div class="seg" id="tier" role="group" aria-label="Answers">
+    <span class="lbl">Answers</span>
+    <button data-tier="quick" title="The fastest model. Text starts almost at once.">Fast</button>
+    <button data-tier="default" title="The everyday model. It thinks for a moment before it writes.">Balanced</button>
+    <button data-tier="complex" title="The most capable model. Slowest to start.">Deep</button>
+  </div>
+  <button class="btn" id="writeup" title="Turn the whole tree into one document">Write it up</button>
+</header>
+
+<div id="notice" class="notice" role="status" hidden></div>
+
+<div class="app">
+  <aside class="side" id="side">
+    <section>
+      <div class="h">
+        <h3>Conversations</h3>
+        <button class="linkbtn" id="newconv" title="Start a new conversation">New</button>
+      </div>
+      <div id="convs"></div>
+    </section>
+    <section>
+      <h3>Map</h3>
+      <div class="counts" id="counts"></div>
+      <div id="tree"></div>
+      <button class="next" id="next" hidden></button>
+    </section>
+    <section>
+      <h3>Terms</h3>
+      <div id="terms"></div>
+    </section>
+    <section class="help">
+      <h3>How to use</h3>
+      <ul>
+        <li>Type to carry on, as in any chat.</li>
+        <li>Click a sentence, or highlight any words, to ask about just that part. The thread opens beside it.</li>
+        <li><b>Continue from here</b> under an earlier answer branches off there and folds what came after.</li>
+        <li>Dotted words show a one-line definition on hover.</li>
+      </ul>
+    </section>
+  </aside>
+  <main id="panes"></main>
+</div>
+
+<div id="scrim" class="scrim"></div>
+<div id="pop" class="pop" role="menu"></div>
+<div id="gloss" class="pop glosspop"></div>
+<div id="toast" class="toast" role="status"></div>
+<div id="modal" class="modal"></div>
+
+<script src="llm.js"></script>
+<script src="app.js"></script>

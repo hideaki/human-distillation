@@ -1,0 +1,5 @@
+# Build output: python3 live/build.py recreates it
+live/dist/
+
+__pycache__/
+.DS_Store

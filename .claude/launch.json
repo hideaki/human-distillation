@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mock",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4173"],
+      "port": 4173
+    },
+    {
+      "name": "live",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["live/dev.py"],
+      "port": 4174
+    }
+  ]
+}

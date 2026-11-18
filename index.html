@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Human distillation: UI mock</title>
+  <link rel="stylesheet" href="styles.css?v=3">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">Human distillation <span class="tag">UI mock · canned answers, no model</span></div>
+    <div class="spacer"></div>
+    <div class="reader" id="reader">
+      <span class="lbl">Reader</span>
+      <button data-level="1" title="Gloss every term">Newcomer</button>
+      <button data-level="2" title="Gloss only terms specific to this topic">Knows ML basics</button>
+    </div>
+    <button class="btn" id="writeup" title="Turn the tree into one document">Write it up</button>
+    <button class="btn quiet" id="reset" title="Clear everything and start over">Reset</button>
+  </header>
+
+  <div class="app">
+    <aside class="side">
+      <section>
+        <h3>Map</h3>
+        <div class="counts" id="counts"></div>
+        <div id="tree"></div>
+        <button class="next" id="next"></button>
+      </section>
+      <section>
+        <h3>Terms</h3>
+        <div id="terms"></div>
+      </section>
+      <section class="help">
+        <h3>How to use</h3>
+        <ul>
+          <li>Type to carry on, as in any chat.</li>
+          <li>Click a sentence, or highlight any words, to ask about just that part. The thread opens beside it.</li>
+          <li><b>Continue from here</b> under an earlier answer branches off there and folds what came after.</li>
+          <li>Dotted words show a one-line gloss on hover.</li>
+        </ul>
+      </section>
+    </aside>
+    <main id="panes"></main>
+  </div>
+
+  <div id="pop" class="pop" role="menu"></div>
+  <div id="gloss" class="pop glosspop"></div>
+  <div id="toast" class="toast"></div>
+  <div id="modal" class="modal"></div>
+
+  <script src="content.js?v=3"></script>
+  <script src="app.js?v=3"></script>
+</body>
+</html>

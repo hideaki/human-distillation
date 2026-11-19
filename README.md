@@ -1,5 +1,20 @@
 # Human Distillation
 
+A prototype of a chat with Claude for understanding hard ideas, in which any
+part of an answer can be asked about on its own: a sentence, a formula, one
+symbol in it, a box of a diagram.
+
+![A 49-second demo: a question, a side thread opened on a sentence, "Got it" leaving a takeaway, a question about one symbol of a formula, a question about a box of a diagram, and the map](docs/demo.gif)
+
+*Recorded on the live artifact. The answers are Claude's, as they came. It
+is a sequence of steps and not a continuous recording: the waits are cut
+short, and the author's other conversations are covered in the sidebar.
+[The same as MP4](docs/demo.mp4).*
+
+**Try it now:** [open it in Claude](https://claude.ai/artifact/DT4Eotmtno3AZhJtxc7fA5). It opens
+on a worked example. A question of your own is answered by Claude on your own
+account, so it needs one and counts against your usage.
+
 Learning and understanding things through conversation with an AI is
 becoming the main way for a person to learn something new, and the most
 efficient one.
@@ -78,7 +93,9 @@ an answer loses you, which happens a lot with hard material.
 ## Try it
 
 The app runs as a Claude artifact, and that is the one way to use it for
-real: the answers come from Claude, on your own account.
+real: the answers come from Claude, on your own account. The link at the top
+of this page opens a shared copy. To have one of your own, publish it as
+described below.
 
 It has no server and no API key. It is one HTML file that Claude hosts
 as an artifact, a page on claude.ai that is private until you share it. The
@@ -545,7 +562,7 @@ every kind of thread (main, passage, formula, symbol, diagram part).
       dev.py              the local preview server
       build.py            writes the one file that is published
       test/, TESTING.md   the tests
-    docs/                 the screenshots above
+    docs/                 the demo recording and the screenshots above
     index.html, app.js, content.js, styles.css
                           the first mock, with canned content and no model.
                           Superseded, and kept for the record.

@@ -28,7 +28,11 @@ in step when a feature is added or the way to publish changes.
     README.md, LICENSE    for readers of the repository (MIT)
     docs/                 the README's two screenshots, taken from the worked
                           example in the local preview. Retake them when the
-                          page's look changes.
+                          page's look changes. Also `demo.gif` and `demo.mp4`,
+                          recorded on the live artifact with Claude's own
+                          answers: frames from the Chrome extension's
+                          recorder, cut with ffmpeg (Claude's bar cropped,
+                          the other conversations covered, captions added).
     index.html, app.js, content.js, styles.css (in the root)
                           the first mock, with canned content. Superseded; leave it.
 
@@ -46,9 +50,12 @@ in step when a feature is added or the way to publish changes.
   and the static check. The flow
   tests run in the Browser pane at `/test`. `live/TESTING.md` explains all
   three, including the grid (every per-thread action in every kind of thread).
-- Publish: the app lives as a private Claude artifact in the author's Claude
-  account. Its link is in the memory note about the artifact and is kept out
-  of this file, which is public. Order: `npm test`, then
+- Publish: the app lives as two Claude artifacts in the author's Claude
+  account: one for experiments, and a copy for sharing, which is the one the
+  README's "Try it now" line points to. Be sure which is meant before
+  publishing. Their links are in the memory note about the artifact, and the
+  experimental one's is kept out of this file, which is public. Order:
+  `npm test`, then
   `python3 live/build.py`, then the flow tests on `/test?page=built`, then
   publish `live/dist/human-distillation.html` to that URL. From a new
   conversation, read the artifact first and pass the URL, or a second artifact

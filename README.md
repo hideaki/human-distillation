@@ -4,7 +4,7 @@ A prototype of a chat with Claude for understanding hard ideas, in which any
 part of an answer can be asked about on its own: a sentence, a formula, one
 symbol in it, a box of a diagram.
 
-![A one-minute demo: a question, a side thread opened on a sentence, "Got it" leaving a takeaway, a question about one symbol of a formula, a question about a box of a diagram, and the map](docs/demo.gif)
+![A 72-second demo: a question, a side thread opened on a sentence, "Got it" leaving a takeaway, a question about one symbol of a formula, a question about a box of a diagram, and the map](docs/demo.gif)
 
 *Recorded on the live artifact. The answers are Claude's, as they came. It
 is a sequence of steps and not a continuous recording: the waits are cut

@@ -4,18 +4,6 @@ A prototype of a chat with Claude for understanding hard ideas, in which any
 part of an answer can be asked about on its own: a sentence, a formula, one
 symbol in it, a box of a diagram.
 
-![A 72-second demo: a question, a side thread opened on a sentence, "Got it" leaving a takeaway, a question about one symbol of a formula, a question about a box of a diagram, and the map](docs/demo.gif)
-
-*Recorded on the live artifact. The answers are Claude's, as they came. It
-is a sequence of steps and not a continuous recording: the waits are cut
-short, each scene opens with a pause, and the author's other conversations
-are covered in the sidebar. The last two scenes were recorded later, in a
-smaller window, so they are a little larger. [The same as MP4](docs/demo.mp4).*
-
-**Try it now:** [open it in Claude](https://claude.ai/artifact/DT4Eotmtno3AZhJtxc7fA5). It opens
-on a worked example. A question of your own is answered by Claude on your own
-account, so it needs one and counts against your usage.
-
 ## The problem to solve
 
 Learning and understanding things through conversation with an AI is
@@ -27,6 +15,20 @@ the two get only as far as the person can follow what the AI tells them.
 
 This project is my pursuit of the ideal interface for a person to learn from
 AI.
+
+## Demo
+
+![A 72-second demo: a question, a side thread opened on a sentence, "Got it" leaving a takeaway, a question about one symbol of a formula, a question about a box of a diagram, and the map](docs/demo.gif)
+
+*Recorded on the live artifact. The answers are Claude's, as they came. It
+is a sequence of steps and not a continuous recording: the waits are cut
+short, each scene opens with a pause, and the author's other conversations
+are covered in the sidebar. The last two scenes were recorded later, in a
+smaller window, so they are a little larger. [The same as MP4](docs/demo.mp4).*
+
+**Try it now:** [open it in Claude](https://claude.ai/artifact/DT4Eotmtno3AZhJtxc7fA5). It opens
+on a worked example. A question of your own is answered by Claude on your own
+account, so it needs one and counts against your usage.
 
 ## What it is
 
@@ -96,8 +98,8 @@ an answer loses you, which happens a lot with hard material.
 ## Try it
 
 The app runs as a Claude artifact, and that is the one way to use it for
-real: the answers come from Claude, on your own account. The link at the top
-of this page opens a shared copy. To have one of your own, publish it as
+real: the answers come from Claude, on your own account. The link under the
+[demo](#demo) opens a shared copy. To have one of your own, publish it as
 described below.
 
 It has no server and no API key. It is one HTML file that Claude hosts

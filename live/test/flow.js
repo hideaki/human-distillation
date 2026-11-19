@@ -1288,7 +1288,7 @@
     ok(node(side).notion && lastCall().tools, 'Pointing at an answer that read a page asks with the Notion tools');
     const sent = lastCall().turns.map(x => x.content).join('\n');
     has(sent, '[For this question this page of my Notion was read and shown to you.', 'The pointed question is told what was read');
-    has(sent, 'read it again with notion_fetch.]\n--- 1. “Placeholder page 1” (https://www.notion.so/placeholder-1)\n# Placeholder page 1', 'It is told it may read again, and gets the page');
+    has(sent, 'read it again with notion_fetch.]\n--- 1. “Placeholder page 1” (https://www.notion.so/placeholder-1): read whole\n# Placeholder page 1', 'It is told it may read again, and gets the page');
     eq($$(`.turn[data-node="${side}"] .sources a.src`).length, 1, 'The page the side thread read itself is shown under its answer');
   });
 

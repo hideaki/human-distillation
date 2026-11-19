@@ -70,7 +70,9 @@ uses the user's existing connections with no sign-in of its own.
   thread. The answer keeps which parts were read (`parts`, `of` on the
   source).
 - Claude does not remember what it read. Each later question is told every
-  page the answers above it read (`refs`), with their text as far as 60 KB
+  page the answers above it read and how much of each (`refs`, `howMuch`;
+  it would otherwise take a cut repeat for a cut reading), with their text as
+  far as 60 KB
   per answer goes, shared between that answer's pages (`settle`): short pages
   whole, long ones cut. When the thread is too long to send, the oldest
   answers' pages are cut down to their names. A question asked by pointing or

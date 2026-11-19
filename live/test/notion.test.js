@@ -57,7 +57,7 @@ test('a short page goes whole, with no talk of parts', async () => {
   const { res, calls } = await run({ a: text }, async fetch => { got = await fetch({ id: 'a' }); });
   assert.equal(got, text);
   assert.deepEqual(calls, [['notion-fetch', 'a']]);
-  assert.deepEqual(res.sources, [{ kind: 'page', title: 'Handover', url: 'https://www.notion.so/handover', state: 'done', error: undefined, text }]);
+  assert.deepEqual(res.sources, [{ kind: 'page', title: 'Handover', url: 'https://www.notion.so/handover', state: 'done', error: undefined, text, whole: true }]);
 });
 
 test('a long page comes in parts that fit a tool result and together are the whole page', async () => {
@@ -122,8 +122,8 @@ test('the source says which parts were read, and that travels to the next questi
   const history = [{ prompt: 'Summarise the page', raw: res.raw, sources: res.sources }];
   await LLM.ask({ prompt: 'And then?', history, notion: false });
   const off = sent[sent.length - 1][1].content;
-  assert.ok(off.startsWith('Summarise the page\n\n[For this question this page of my Notion was read and shown to you. To save space, a long one is repeated below only in part, and a note says where it stops. If a question needs something that is not repeated here, say that this part of the page is not in front of you now, and that I can ask again with "Look in my Notion" ticked. Do not say that the page was not read.]\n--- 1. “Handover” (https://www.notion.so/handover), parts 1, 3 of '), off.slice(0, 500));
-  assert.match(off, /, parts 1, 3 of \d+\n\[This page is long and comes in/);
+  assert.ok(off.startsWith('Summarise the page\n\n[For this question this page of my Notion was read and shown to you. Each line below that starts with "---" names a page and says how much of it was read then. To save space the text of a long page is repeated only in part, with a note where the repeat stops. Where it stops says nothing about how much was read: go by the line. If a question needs something that is not repeated here, say that this part of the page is not in front of you now, and that I can ask again with "Look in my Notion" ticked. Do not say that the page was not read.]\n--- 1. “Handover” (https://www.notion.so/handover): only parts 1, 3 of '), off.slice(0, 700));
+  assert.match(off, /: only parts 1, 3 of \d+ read\n\[This page is long and comes in/);
 
   // A question that may look in Notion is told to read again instead.
   await LLM.ask({ prompt: 'And then?', history, notion: true });
@@ -137,9 +137,9 @@ test('every page an answer read travels on: short ones whole, long ones sharing 
   ['l1', 'l2', 'l3', 'l4', 'l5', 'l6'].forEach((id, i) => { pages[id] = section(i + 1, 220); });
   Object.values(pages).forEach(t => assert.ok(jsonSize(t) <= 30000, 'each page fits one result'));
   const ids = Object.keys(pages).reverse(); // the long ones first: the order read must not matter
-  const { res } = await run(pages, async fetch => { for (const id of ids) await fetch({ id }); });
-  assert.deepEqual(res.sources.map(s => s.state), ids.map(() => 'done'));
-  const CUT = '\n[The page goes on from here. The rest is not repeated.]';
+  const { res, LLM, sent } = await run(pages, async fetch => { for (const id of ids) await fetch({ id }); });
+  assert.deepEqual(res.sources.map(s => [s.state, s.whole]), ids.map(() => ['done', true]));
+  const CUT = '\n[Only this much is repeated here. The page was read to its end.]';
   const short = res.sources.slice(6), long = res.sources.slice(0, 6);
   assert.deepEqual(short.map(s => s.text), ['s4', 's3', 's2', 's1'].map(id => pages[id]), 'short pages travel whole');
   long.forEach((s, i) => {
@@ -150,6 +150,29 @@ test('every page an answer read travels on: short ones whole, long ones sharing 
   assert.ok(Math.max(...sizes) - Math.min(...sizes) < 200, `long pages get the same share: ${sizes}`);
   const total = res.sources.reduce((a, s) => a + bytes(s.text), 0);
   assert.ok(total > 59000 && total <= 60000 + 6 * bytes(CUT), `${total} bytes carried in all`);
+
+  // The next question is told that each page was read whole, cut or not.
+  await LLM.ask({ prompt: 'Were they all read?', history: [{ prompt: 'Summarise', raw: res.raw, sources: res.sources }], notion: false });
+  const lines = sent[sent.length - 1][1].content.split('\n').filter(l => l.startsWith('--- '));
+  assert.deepEqual(lines, ids.map((_, i) => `--- ${i + 1}. “Handover” (https://www.notion.so/handover): read whole`));
+});
+
+test('a long page read to its last part is said to be read whole, and one read in part is not', async () => {
+  const got = { whole: null, some: null };
+  const { res: all } = await run({ a: LONG }, async fetch => {
+    const n = Number(/^\[Part 1 of (\d+)/.exec(await fetch({ id: 'a' }))[1]);
+    for (let k = 2; k <= n; k++) await fetch({ id: 'a', part: k });
+  });
+  const { res: part, LLM, sent } = await run({ a: LONG }, async fetch => { await fetch({ id: 'a' }); });
+  got.whole = all.sources[0];
+  got.some = part.sources[0];
+  assert.ok(got.whole.text.endsWith('\n[Only this much is repeated here. The page was read to its end.]'));
+  assert.ok(!got.some.text.includes('Only this much is repeated here'), 'one part is within what an answer carries');
+  await LLM.ask({ prompt: 'Next', history: [{ prompt: 'A', raw: 'a', sources: all.sources }, { prompt: 'B', raw: 'b', sources: part.sources }], notion: false });
+  const lines = sent[sent.length - 1].map(t => t.content).join('\n').split('\n').filter(l => l.startsWith('--- '));
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /: read whole, in \d+ parts$/);
+  assert.match(lines[1], /: only part 1 of \d+ read$/);
 });
 
 test('pages an older answer read are named even where their text is not kept', async () => {
@@ -157,12 +180,13 @@ test('pages an older answer read are named even where their text is not kept', a
     { kind: 'search', query: 'handover', hits: 3, state: 'done' },
     { kind: 'page', title: 'Kept', url: 'https://www.notion.so/kept', state: 'done', text: 'The text of the first.' },
     { kind: 'page', title: 'Dropped', url: '', state: 'done', text: '' },
+    { kind: 'page', title: 'Cut', url: '', state: 'done', text: 'Its start.\n[The rest of this page was left out.]' },
     { kind: 'page', title: 'Failed', url: '', state: 'error', error: 'No such page.', text: '' },
   ];
   const { sent } = await run({}, async () => {}, { history: [{ prompt: 'First', raw: 'An answer.', sources }], notion: false });
   const said = sent[0][1].content;
-  assert.ok(said.startsWith('First\n\n[For this question these 2 pages of my Notion were read and shown to you. '));
-  assert.ok(said.endsWith(']\n--- 1. “Kept” (https://www.notion.so/kept)\nThe text of the first.\n--- 2. “Dropped”\n[Not repeated here.]'), said.slice(-200));
+  assert.ok(said.startsWith('First\n\n[For this question these 3 pages of my Notion were read and shown to you. '));
+  assert.ok(said.endsWith(']\n--- 1. “Kept” (https://www.notion.so/kept): read whole\nThe text of the first.\n--- 2. “Dropped”: read, but how far is not recorded\n[Not repeated here.]\n--- 3. “Cut”: read, but how far is not recorded\nIts start.\n[The rest of this page was left out.]'), said.slice(-300));
   assert.ok(!said.includes('Failed'));
 });
 
@@ -175,8 +199,8 @@ test('when the thread is too long to send, the oldest pages are cut down to thei
   const { sent } = await run({}, async () => {}, { history, notion: true });
   const turns = sent[0];
   assert.deepEqual(turns.map(t => t.role), ['user', 'user', 'assistant', 'user', 'assistant', 'user']);
-  assert.equal(turns[1].content, 'First\n\n[For this question this page of my Notion was read and shown to you: “Old”, parts 1–2 of 5. To save space their text is not repeated here. If you need more of a page than is repeated here, read it again with notion_fetch.]');
-  assert.ok(turns[3].content.includes('--- 1. “New”, parts 1–2 of 5\nxxxx') && bytes(turns[3].content) > 150000);
+  assert.equal(turns[1].content, 'First\n\n[For this question this page of my Notion was read and shown to you: “Old”: only parts 1–2 of 5 read. To save space their text is not repeated here. If you need more of a page than is repeated here, read it again with notion_fetch.]');
+  assert.ok(turns[3].content.includes('--- 1. “New”: only parts 1–2 of 5 read\nxxxx') && bytes(turns[3].content) > 150000);
 });
 
 test('reading a part twice costs nothing, and a part that does not exist is refused without spoiling the source', async () => {

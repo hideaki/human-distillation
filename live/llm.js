@@ -118,15 +118,25 @@ const LLM = (() => {
   function refs(sources, notion, brief) {
     const pages = (sources || []).filter(s => s.kind === 'page' && s.state === 'done');
     if (!pages.length) return '';
-    const name = s => `“${s.title || 'Notion page'}”${s.url ? ' (' + s.url + ')' : ''}`
-      + (s.of > 1 && s.parts ? (s.parts.length === s.of ? `, all ${s.of} parts` : `, ${partSpan(s.parts)} of ${s.of}`) : '');
+    const name = s => `“${s.title || 'Notion page'}”${s.url ? ' (' + s.url + ')' : ''}: ${howMuch(s)}`;
     const which = pages.length === 1 ? 'this page of my Notion was' : `these ${pages.length} pages of my Notion were`;
     const again = notion
       ? 'If you need more of a page than is repeated here, read it again with notion_fetch.'
       : 'If a question needs something that is not repeated here, say that this part of the page is not in front of you now, and that I can ask again with "Look in my Notion" ticked. Do not say that the page was not read.';
     if (brief) return `\n\n[For this question ${which} read and shown to you: ${pages.map(name).join('; ')}. To save space their text is not repeated here. ${again}]`;
-    return `\n\n[For this question ${which} read and shown to you. To save space, a long one is repeated below only in part, and a note says where it stops. ${again}]\n`
+    return `\n\n[For this question ${which} read and shown to you. Each line below that starts with "---" names a page and says how much of it was read then. To save space the text of a long page is repeated only in part, with a note where the repeat stops. Where it stops says nothing about how much was read: go by the line. ${again}]\n`
       + pages.map((s, i) => `--- ${i + 1}. ${name(s)}\n${s.text || '[Not repeated here.]'}`).join('\n');
+  }
+
+  // How much of a page an answer read, from what is kept with that answer.
+  // Claude cannot tell this from the text repeated to it, which is cut to
+  // save space wherever the page is long.
+  function howMuch(s) {
+    if (s.of > 1 && s.parts) return s.parts.length === s.of ? `read whole, in ${s.of} parts` : `only ${partSpan(s.parts)} of ${s.of} read`;
+    // An answer from before long pages were read in parts may have had its
+    // page cut short on reading, and nothing kept with it says whether it was.
+    if (!s.whole && (!s.text || /\n\[The rest of this page was left out\.\]$/.test(s.text))) return 'read, but how far is not recorded';
+    return 'read whole';
   }
 
   // Claude keeps nothing between calls: every question is sent with the turns
@@ -293,7 +303,10 @@ const LLM = (() => {
       list.forEach((x, i) => {
         const got = Math.min(x.want, Math.floor(left / (list.length - i)));
         left -= got;
-        x.p.src.text = x.head + capJson(x.text, Math.max(0, got - bytes(x.head)) + 2, x.head ? '\n[What was read goes on from here. The rest is not repeated.]' : '\n[The page goes on from here. The rest is not repeated.]');
+        const whole = x.p.read.size === x.p.parts.length;
+        x.p.src.text = x.head + capJson(x.text, Math.max(0, got - bytes(x.head)) + 2, whole
+          ? '\n[Only this much is repeated here. The page was read to its end.]'
+          : '\n[Only this much is repeated here. The parts that were read go on beyond this.]');
       });
     };
 
@@ -410,7 +423,9 @@ const LLM = (() => {
     return sources.map(s => {
       if (s.kind === 'search') return { kind: 'search', query: s.query, hits: s.hits, state: s.state, error: s.error };
       const page = { kind: 'page', title: s.title, url: s.url, state: s.state, error: s.error, text: s.state === 'done' ? s.text : '' };
+      // How much of it was read: certain parts of a long page, or all of it.
       if (s.of > 1) Object.assign(page, { parts: s.parts, of: s.of });
+      else if (s.state === 'done') page.whole = true;
       return page;
     });
   }

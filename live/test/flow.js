@@ -458,6 +458,7 @@
     eq(calls().length, 1, 'Requests to Claude');
     same(lastCall().turns.map(x => x.role), ['user', 'user'], 'The turns sent');
     has(lastCall().turns[0].content, 'You are the explainer inside a study app', 'The first turn sent');
+    ok(new RegExp(`\\n- Today is \\w+day, \\d{1,2} \\w+ ${new Date().getFullYear()}\\. `).test(lastCall().turns[0].content), 'Claude is told today\'s date');
     eq(lastCall().prompt, FIRST, 'The question sent');
     // Offsets count the source of a formula and nothing of a diagram.
     has(txt(t), FORMULA, 'The text of the answer');

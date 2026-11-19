@@ -62,6 +62,8 @@ uses the user's existing connections with no sign-in of its own.
 - Claude keeps nothing between calls. Every question is sent with the turns
   on the path that leads to it, and with the instructions in `rules()` as the
   first turn (there is no system prompt).
+- The instructions state today's date from the viewer's clock (`dateWords`).
+  Without it Claude takes the year its knowledge ends for the present.
 - An answer is prose, then optionally one fenced `graph` block, then a line
   `@@@` followed by `term: <term> = <definition>` and `next: <question>` lines.
   Formulas are LaTeX: `$...$` in a sentence, `$$...$$` on a line of its own.

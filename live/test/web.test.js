@@ -223,6 +223,20 @@ test('a question with no web in it is told nothing about the web', async () => {
   assert.deepEqual(sent[0].tools, []);
 });
 
+test('Claude is told today\'s date, and to search by it', async () => {
+  const { ask, sent } = world({});
+  const DATE = '- Today is Thursday, 19 November 2026. Your knowledge stops some time before today, so the latest thing you know of may not be the latest there is.';
+  await ask(null, { web: false, today: new Date(2026, 10, 19) });
+  assert.ok(sent[0].turns[0].content.includes(DATE), 'with no lookups on');
+  await ask(null, { web: true, today: new Date(2026, 10, 19) });
+  const told = sent[1].turns[0].content;
+  assert.ok(told.includes(DATE) && told.includes('word the query for today\'s date and not for the last year you know of'), 'with the web on');
+  await ask(null, { web: false, today: new Date(2027, 0, 1) });
+  assert.ok(sent[2].turns[0].content.includes('- Today is Friday, 1 January 2027.'));
+  await ask(null, { web: false });
+  assert.match(sent[3].turns[0].content, new RegExp(`\\n- Today is \\w+day, \\d{1,2} \\w+ ${new Date().getFullYear()}\\. `), 'left to itself it reads the clock');
+});
+
 test('a connector the viewer has not added is not offered, and is reported as missing', async () => {
   const none = world({ servers: [NOTION] });
   await none.LLM.ready;

@@ -3,3 +3,9 @@ live/dist/
 
 __pycache__/
 .DS_Store
+
+# Only there if an ESLint is installed for the project (live/TESTING.md)
+node_modules/
+
+# Claude Code settings of one machine
+.claude/settings.local.json

@@ -7,8 +7,10 @@ box or link of a diagram. The side question opens beside the answer, so the
 conversation is a tree and every branch is kept.
 
 The why, the user's design decisions and their preferences are in the
-project's memory notes, which load with every session. This file is about the
-code.
+project's memory notes, which load with every session on the author's
+machine and are not in the repository. This file is about the code.
+`README.md` is the account for a reader who comes to the repository: keep it
+in step when a feature is added or the way to publish changes.
 
 ## Where things are
 
@@ -23,6 +25,10 @@ code.
       build.py            writes live/dist/human-distillation.html, the one
                           file that is published (git-ignored)
       test/, TESTING.md   the regression tests
+    README.md, LICENSE    for readers of the repository (MIT)
+    docs/                 the README's two screenshots, taken from the worked
+                          example in the local preview. Retake them when the
+                          page's look changes.
     index.html, app.js, content.js, styles.css (in the root)
                           the first mock, with canned content. Superseded; leave it.
 
@@ -40,8 +46,9 @@ code.
   and the static check. The flow
   tests run in the Browser pane at `/test`. `live/TESTING.md` explains all
   three, including the grid (every per-thread action in every kind of thread).
-- Publish: the app lives as a private Claude artifact at
-  https://claude.ai/artifact/Pdf2MH97soMq4YZjWTjQS5. Order: `npm test`, then
+- Publish: the app lives as a private Claude artifact in the author's Claude
+  account. Its link is in the memory note about the artifact and is kept out
+  of this file, which is public. Order: `npm test`, then
   `python3 live/build.py`, then the flow tests on `/test?page=built`, then
   publish `live/dist/human-distillation.html` to that URL. From a new
   conversation, read the artifact first and pass the URL, or a second artifact
@@ -160,9 +167,13 @@ uses the user's existing connections with no sign-in of its own.
 
 ## Working rules here
 
-- Git: local only, no remote. Commit finished, checked work. A feature goes
-  on its own branch and is merged into `main` when the user says so. Never
-  push.
+- Git: commit finished, checked work. A feature goes on its own branch and
+  is merged into `main` when the user says so. The repository is meant for
+  GitHub, where it is public: push only when the user asks, each time, and
+  only `main`.
+- Nothing private goes into a tracked file or a commit message: no key, no
+  address of the user's, nothing read in their Notion. Fixtures and the
+  stand-in use made-up pages.
 - The live page acts on the user's Claude account. Pressing its permission
   prompts, or running a real question on it, needs the user's go-ahead each
   time. What is seen of the user's Notion there is private.

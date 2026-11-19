@@ -855,9 +855,20 @@
     });
     try { dagre.layout(lay); } catch (err) { root.append(el('ul', {}, g.edges.map(e => el('li', {}, edgeText(g, e))))); return host; }
 
-    const size = lay.graph();
-    const W = Math.ceil(size.width), H = Math.ceil(size.height);
-    const out = svg('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'img', 'aria-label': 'Diagram: ' + g.edges.map(e => edgeText(g, e)).join('; '), class: clickable ? 'can' : '' });
+    // The frame is measured here from what is drawn. The size dagre gives
+    // counts the boxes and the labels but not the bends of a link, and a link
+    // that goes round the boxes (one that closes a loop, say) was cut off.
+    const EDGE = 6;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    const span = (x, y, w, h) => { x0 = Math.min(x0, x - w / 2); x1 = Math.max(x1, x + w / 2); y0 = Math.min(y0, y - h / 2); y1 = Math.max(y1, y + h / 2); };
+    g.nodes.forEach((n, i) => { const pos = lay.node('n' + i); span(pos.x, pos.y, n.w, n.h); });
+    g.edges.forEach((e, i) => {
+      const pos = lay.edge({ v: 'n' + e.from, w: 'n' + e.to, name: 'e' + i });
+      pos.points.forEach(q => span(q.x, q.y, 0, 0));
+      if (e.label && pos.x != null) span(pos.x, pos.y, e.lw, 18);
+    });
+    const X = Math.floor(x0 - EDGE), Y = Math.floor(y0 - EDGE), W = Math.ceil(x1 + EDGE) - X, H = Math.ceil(y1 + EDGE) - Y;
+    const out = svg('svg', { viewBox: `${X} ${Y} ${W} ${H}`, width: W, height: H, role: 'img', 'aria-label': 'Diagram: ' + g.edges.map(e => edgeText(g, e)).join('; '), class: clickable ? 'can' : '' });
     const r1 = v => Math.round(v * 10) / 10;
     const head = (a, b) => { // an arrowhead at b, coming from a
       const d = Math.hypot(b.x - a.x, b.y - a.y) || 1, ux = (b.x - a.x) / d, uy = (b.y - a.y) / d;

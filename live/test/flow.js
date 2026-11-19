@@ -835,6 +835,30 @@
     same([node(inner).parent, node(inner).anchor.part], [d, 'n:b'], 'A thread on the box');
   });
 
+  // A link that closes a loop goes round the boxes. The layout's own size
+  // for the drawing leaves such a bend out, and the link was cut off at the
+  // edge of the frame. Seen with a diagram Claude drew on the live page.
+  test('Diagrams', 'a diagram with loops in it is drawn whole, nothing is cut off at its frame', async () => {
+    const raw = ['Steps that loop back.', '', '```graph', 'Plan -> Build', 'Build -> Test', 'Test -> Review', 'Review -> Release',
+      'Release -> Plan', 'Release -> Build', 'Release -> Test : found a bug', '```', '', 'After it.'].join('\n');
+    const made = {
+      id: 'made', title: 'Loops', created: 1, updated: 2, seq: 1, tips: {}, looked: {}, cols: [{ start: 'root', leaf: 'root' }],
+      nodes: { root: { id: 'root', seq: 0, parent: null, anchor: null, q: 'Loops', prompt: 'Loops', raw, phase: 'done', status: 'open', ready: true } },
+    };
+    await load({ seed: JSON.stringify({ v: 1, current: 'made', convs: { made }, prefs: {} }) });
+    const drawing = figure(mainText()).shadowRoot.querySelector('svg');
+    const [x, y, w, h] = drawing.getAttribute('viewBox').split(' ').map(Number);
+    eq(figParts(mainText()).length, 12, 'The boxes and links of the diagram');
+    figParts(mainText()).forEach(p => {
+      const b = p.getBBox();
+      ok(b.x >= x && b.x + b.width <= x + w && b.y >= y && b.y + b.height <= y + h,
+        `"${p.dataset.part}" lies inside the frame: ${Math.round(b.x)} to ${Math.round(b.x + b.width)} across, in a frame from ${x} to ${x + w}`);
+    });
+    // The drawing is shown at its own size, so nothing is cut by the page either.
+    const shown = drawing.getBoundingClientRect(), room = figure(mainText()).getBoundingClientRect();
+    ok(Math.abs(shown.width - w) <= 1 && shown.left >= room.left - 1 && shown.right <= room.right + 1, 'The drawing fits the room it has');
+  });
+
   // ----- terms -----
 
   const gloss = term => $$('.gloss', mainText()).find(g => txt(g) === term);

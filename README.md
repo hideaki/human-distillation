@@ -4,12 +4,13 @@ A prototype of a chat with Claude for understanding hard ideas, in which any
 part of an answer can be asked about on its own: a sentence, a formula, one
 symbol in it, a box of a diagram.
 
-![A 49-second demo: a question, a side thread opened on a sentence, "Got it" leaving a takeaway, a question about one symbol of a formula, a question about a box of a diagram, and the map](docs/demo.gif)
+![A one-minute demo: a question, a side thread opened on a sentence, "Got it" leaving a takeaway, a question about one symbol of a formula, a question about a box of a diagram, and the map](docs/demo.gif)
 
 *Recorded on the live artifact. The answers are Claude's, as they came. It
 is a sequence of steps and not a continuous recording: the waits are cut
-short, and the author's other conversations are covered in the sidebar.
-[The same as MP4](docs/demo.mp4).*
+short, each scene opens with a pause, and the author's other conversations
+are covered in the sidebar. The last two scenes were recorded later, in a
+smaller window, so they are a little larger. [The same as MP4](docs/demo.mp4).*
 
 **Try it now:** [open it in Claude](https://claude.ai/artifact/DT4Eotmtno3AZhJtxc7fA5). It opens
 on a worked example. A question of your own is answered by Claude on your own

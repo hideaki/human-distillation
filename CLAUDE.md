@@ -46,10 +46,9 @@ code.
   publish `live/dist/human-distillation.html` to that URL. From a new
   conversation, read the artifact first and pass the URL, or a second artifact
   is created. Leave `capabilities` out so the stored ones are kept (`sample`,
-  and `mcp` for Notion's `notion-search` and `notion-fetch`). The first
-  publish with the web in it must instead state the whole set, adding the
-  `Parallel Search` connector's `web_search` and `web_fetch` to `mcp`: a
-  stated set replaces the stored one.
+  and `mcp` for Notion's `notion-search` and `notion-fetch` and for Parallel
+  Search's `web_search` and `web_fetch`). To add a connector, state the whole
+  set: a stated set replaces the stored one.
 - Nothing is published without a full pass of the tests.
 
 ## How the app talks to Claude

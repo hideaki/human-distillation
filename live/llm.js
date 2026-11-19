@@ -100,7 +100,10 @@ const LLM = (() => {
       '- Reply in the language the person writes in.',
     ];
     if (o.notion) {
-      lines.push('- You can look in this person\'s Notion with notion_search and notion_fetch. Use them when the question is about their own notes, documents, projects or team, or when they ask you to. Call them without announcing it, read what you need, then write the answer and name the pages it draws on. A long page comes in numbered parts: read the parts the question needs before you answer, and if you leave any unread, say which. For general knowledge, answer without them.');
+      lines.push('- You can look in this person\'s Notion with notion_search and notion_fetch. Use them when the question is about their own notes, documents, projects or team, or when they ask you to. Call them without announcing it, read what you need, then write the answer. A long page comes in numbered parts: read the parts the question needs before you answer, and if you leave any unread, say which. For general knowledge, answer without them.');
+    }
+    if (o.notion || (o.history || []).some(h => (h.sources || []).some(s => s.kind === 'page' && s.state === 'done'))) {
+      lines.push('- Say where each point comes from. At the end of every paragraph or list item that draws on a page of their Notion, name that page as a link, written [page title](page URL) with the title and URL you were given for it, and add the heading of the section where the page has headings. When a paragraph draws on several pages, name each. A page you were given no URL for is named by its title alone.');
     }
     lines.push(
       '',
@@ -393,12 +396,14 @@ const LLM = (() => {
               // A page that came in parts says which of them were read.
               if (n > 1) Object.assign(src, { parts: [...p.read.keys()].sort((a, b) => a - b), of: n });
             }
-            if (n === 1) return capJson(body, RESULT, '\n[The rest of this page was too long to include.]');
-            const name = src.title ? ` of “${clip(src.title, 80)}”` : '';
-            let head = `[Part ${k} of ${n}${name}.]\n`;
+            // Each result opens with what the page is called and where it is,
+            // which is what Claude names when it says where a point comes from.
+            const name = `Notion page “${clip(src.title || 'Untitled', 80)}”${src.url ? ` (${src.url})` : ''}`;
+            if (n === 1) return `[${name}]\n` + capJson(body, RESULT, '\n[The rest of this page was too long to include.]');
+            let head = `[Part ${k} of ${n} of the ${name}.]\n`;
             if (!p.told) {
               p.told = true;
-              head = `[Part ${k} of ${n}${name}. The page is too long to read at once, so it comes in parts. Before you answer, read the parts the question needs: call notion_fetch again with the same id and "part". You may ask for several parts at once. If you answer without having read every part, say which parts you did not read.]\n`
+              head = `[Part ${k} of ${n} of the ${name}. The page is too long to read at once, so it comes in parts. Before you answer, read the parts the question needs: call notion_fetch again with the same id and "part". You may ask for several parts at once. If you answer without having read every part, say which parts you did not read.]\n`
                 + `[What each part holds:\n${outlineOf(parts)}]\n`;
             }
             return capJson(head + body, RESULT) + `\n[End of part ${k} of ${n}.]`;

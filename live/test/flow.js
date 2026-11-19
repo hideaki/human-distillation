@@ -1242,6 +1242,10 @@
     same([txt(link), link.href, link.target], ['Placeholder page 1', 'https://www.notion.so/placeholder-1', '_blank'], 'The page that was read');
     has(txt(answerText(id)), 'From Notion the stand-in read: “Placeholder page 1 about Find the roadmap in”', 'The answer');
     same(n.sources.map(s => [s.kind, s.state]), [['search', 'done'], ['page', 'done']], 'The sources kept with the answer');
+    // The page handed to Claude says what it is called and where it is, so the answer can link to it.
+    const cited = $('a', answerText(id));
+    same([txt(cited), cited.href, cited.target], ['Placeholder page 1', 'https://www.notion.so/placeholder-1', '_blank'], 'The page named in the answer, as a link');
+    has(lastCall().turns[0].content, '- Say where each point comes from.', 'Claude is asked to name its sources');
   });
 
   test('Notion', 'a long page is read in parts, and the source says so when some were left unread', async () => {

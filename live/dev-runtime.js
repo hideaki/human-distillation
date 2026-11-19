@@ -110,7 +110,8 @@
         '\\underbrace{\\sum_{i=1}^{n} \\left( y_i - \\hat{y}_i \\right)^2}_{\\text{squared error}} + \\lambda \\lVert w \\rVert_2^2 + \\frac{1}{2\\sigma^2} \\sum_{k=1}^{K} \\left( \\theta_k - \\mu_k \\right)^2 + \\log \\det \\Sigma + \\frac{n}{2} \\log 2\\pi',
         '$$');
     }
-    if (notes.length) body.push('', 'From Notion the stand-in read: ' + notes.join('; ') + '.');
+    // The page it read is named as a link, as Claude is asked to do.
+    if (notes.length) body.push('', 'From Notion the stand-in read: ' + notes.join('; ') + '.' + (notes.cite ? ' Its source is ' + notes.cite + '.' : ''));
     if (/#long/.test(q)) {
       for (let i = 1; i <= 8; i++) body.push('', `Paragraph ${i} of a longer answer. It is here to see how the page behaves when an answer runs past the bottom of the view. Nothing in it is true or useful.`);
     }
@@ -151,6 +152,8 @@
           // A long page says how many parts it has. Read the rest in one
           // round, as Claude does.
           const count = Number((/^\[Part 1 of (\d+)/.exec(page) || [])[1] || 1);
+          const named = /Notion page “(.+?)” \((https:\/\/[^)\s]+)\)/.exec(page.split('\n')[0]);
+          if (named) notes.cite = `[${named[1]}](${named[2]})`;
           const rest = count > 1 && /#parts/.test(last)
             ? await Promise.all(Array.from({ length: count - 1 }, (_, i) => tool('notion_fetch').execute({ id, part: i + 2 }, ctx)))
             : [];

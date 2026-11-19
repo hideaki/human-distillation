@@ -55,7 +55,7 @@ test('a short page goes whole, with no talk of parts', async () => {
   const text = '# Short\n\nA few lines.\n';
   let got;
   const { res, calls } = await run({ a: text }, async fetch => { got = await fetch({ id: 'a' }); });
-  assert.equal(got, text);
+  assert.equal(got, '[Notion page “Handover” (https://www.notion.so/handover)]\n' + text, 'the page says what it is called and where it is');
   assert.deepEqual(calls, [['notion-fetch', 'a']]);
   assert.deepEqual(res.sources, [{ kind: 'page', title: 'Handover', url: 'https://www.notion.so/handover', state: 'done', error: undefined, text, whole: true }]);
 });
@@ -73,7 +73,7 @@ test('a long page comes in parts that fit a tool result and together are the who
   assert.equal(got.map(body).join(''), LONG);
   assert.deepEqual(calls, [['notion-fetch', 'a']], 'Notion is asked for the page once');
   got.forEach((p, i) => {
-    assert.match(p, new RegExp(`^\\[Part ${i + 1} of ${got.length} of “Handover”\\.`));
+    assert.ok(p.startsWith(`[Part ${i + 1} of ${got.length} of the Notion page “Handover” (https://www.notion.so/handover).`), p.slice(0, 120));
     assert.ok(p.endsWith(`\n[End of part ${i + 1} of ${got.length}.]`));
     assert.equal(/What each part holds/.test(p), i === 0, 'only the first result lists the parts');
   });
@@ -212,7 +212,7 @@ test('reading a part twice costs nothing, and a part that does not exist is refu
     wrong = await fetch({ id: 'a', part: 99 }).catch(e => e.message);
     none = await fetch({ id: 'b', part: 2 }).catch(e => e.message);
   });
-  assert.match(again, /^\[Part 1 of \d+ of “Handover”\.\]\n/, 'the list of parts is not sent twice');
+  assert.match(again, /^\[Part 1 of \d+ of the Notion page “Handover” \(https:\/\/www\.notion\.so\/handover\)\.\]\n/, 'the list of parts is not sent twice');
   assert.match(wrong, /^This page has parts 1 to \d+\.$/);
   assert.equal(none, 'This page is short and has no parts. Leave "part" out.');
   assert.deepEqual(res.sources.map(s => [s.state, s.parts]), [['done', [1]], ['error', undefined]]);
@@ -243,6 +243,16 @@ test('a long thread leaves less room for pages, but never none', async () => {
   assert.deepEqual(got.map(g => /^\[Part/.test(g)), [true, true, false]);
 });
 
+test('Claude is asked to say where each point comes from whenever Notion is in play', async () => {
+  const RULE = '- Say where each point comes from. At the end of every paragraph or list item that draws on a page of their Notion, name that page as a link, written [page title](page URL)';
+  const page = { kind: 'page', title: 'Kept', url: 'https://www.notion.so/kept', state: 'done', text: 'Text.' };
+  const first = async extra => (await run({}, async () => {}, extra)).sent[0][0].content;
+  assert.ok((await first({ notion: true })).includes(RULE), 'a question that may look in Notion');
+  assert.ok((await first({ notion: false, history: [{ prompt: 'A', raw: 'a', sources: [page] }] })).includes(RULE), 'a question after an answer that read a page');
+  assert.ok(!(await first({ notion: false })).includes('Say where each point comes from'), 'a question with no Notion in it');
+  assert.ok(!(await first({ notion: false, history: [{ prompt: 'A', raw: 'a', sources: [{ kind: 'search', query: 'x', hits: 0, state: 'done' }] }] })).includes('Say where each point comes from'), 'a search alone is not a page');
+});
+
 test('a page that cannot be read is an error, and a second try asks Notion again', async () => {
   const pages = {};
   let first, second;
@@ -252,7 +262,7 @@ test('a page that cannot be read is an error, and a second try asks Notion again
     second = await fetch({ id: 'a' });
   });
   assert.equal(first, 'Notion returned an error: Could not find a page with that ID.');
-  assert.equal(second, 'now it is there');
+  assert.equal(second, '[Notion page “Handover” (https://www.notion.so/handover)]\nnow it is there');
   assert.deepEqual(calls, [['notion-fetch', 'a'], ['notion-fetch', 'a']]);
   assert.deepEqual(res.sources.map(s => s.state), ['error', 'done']);
   assert.deepEqual(seen, ['running', 'error', 'error,running', 'error,done']);

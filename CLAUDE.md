@@ -67,7 +67,8 @@ uses the user's existing connections with no sign-in of its own.
   at most. So a longer page goes in numbered parts (`partsOf`): the first
   result says how many there are and what each holds, and Claude asks for the
   others with `part`. One answer reads 180 KB of pages at most, less in a long
-  thread. The answer keeps which parts were read (`parts`, `of` on the
+  thread. Every result opens with the page's title and URL, and `rules()` asks
+  for a link to the page at the end of each paragraph that draws on it. The answer keeps which parts were read (`parts`, `of` on the
   source).
 - Claude does not remember what it read. Each later question is told every
   page the answers above it read and how much of each (`refs`, `howMuch`;

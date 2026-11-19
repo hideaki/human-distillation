@@ -32,7 +32,11 @@ in step when a feature is added or the way to publish changes.
                           recorded on the live artifact with Claude's own
                           answers: frames from the Chrome extension's
                           recorder, cut with ffmpeg (Claude's bar cropped,
-                          the other conversations covered, captions added).
+                          the other conversations covered, captions added,
+                          each scene opened with a pause). The last two
+                          scenes are a later take in a smaller window, and
+                          a little larger. The README's caption keeps to
+                          one line and leaves these details to this file.
     index.html, app.js, content.js, styles.css (in the root)
                           the first mock, with canned content. Superseded; leave it.
 

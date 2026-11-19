@@ -32,10 +32,12 @@ code.
   `.claude/launch.json`. Port 4174. `/` is the page with the stand-in, `/built`
   the built file, `/test` the flow tests.
 - The stand-in answers with placeholder text. Words in a question steer it:
-  `#math`, `#slow`, `#long`, `#error`, `#refuse`, `#deny`, and "notion"
+  `#math`, `#slow`, `#long`, `#error`, `#refuse`, `#deny`, "notion" and `#web`
   (with `#parts` or `#skim` for a long page, read whole or only its start).
-- Tests: `npm test` runs the parsing tests, the Notion tests and the static
-  check. The flow
+  `?missing=web` or `?missing=notion` in the page's address plays a viewer
+  who has not added that connector.
+- Tests: `npm test` runs the parsing tests, the Notion tests, the web tests
+  and the static check. The flow
   tests run in the Browser pane at `/test`. `live/TESTING.md` explains all
   three, including the grid (every per-thread action in every kind of thread).
 - Publish: the app lives as a private Claude artifact at
@@ -44,7 +46,10 @@ code.
   publish `live/dist/human-distillation.html` to that URL. From a new
   conversation, read the artifact first and pass the URL, or a second artifact
   is created. Leave `capabilities` out so the stored ones are kept (`sample`,
-  and `mcp` for Notion's `notion-search` and `notion-fetch`).
+  and `mcp` for Notion's `notion-search` and `notion-fetch`). The first
+  publish with the web in it must instead state the whole set, adding the
+  `Parallel Search` connector's `web_search` and `web_fetch` to `mcp`: a
+  stated set replaces the stored one.
 - Nothing is published without a full pass of the tests.
 
 ## How the app talks to Claude
@@ -79,6 +84,21 @@ uses the user's existing connections with no sign-in of its own.
   answers' pages are cut down to their names. A question asked by pointing or
   with one click gets the Notion functions only if it was typed or its thread
   has read a page already (`notionFor`), so that it can read again.
+- The web works the same way, through the viewer's Parallel Search connector
+  (`WEB` in `llm.js`): `web_search` and `web_fetch` are lent for a question
+  when "Search the web" is ticked. A web page is read in parts and carried on
+  like a Notion page (its source has `from: 'web'`; a Notion source has no
+  `from`). A search hands Claude excerpts; later questions get only what it
+  found, by title and address (`found`, `searched`).
+- `web_fetch` reads only an address that the person, a search result or a
+  page already read has named (`mayRead`). An address Claude put together
+  could carry what it read in the person's Notion out to another site. Keep
+  this check when changing the tools.
+- A connector the viewer has not added: `connectors()` asks the runtime for
+  the list at load (listing never prompts) and `rt.missing` records what is
+  absent. That lookup is then not lent to Claude, and the message box shows
+  it as "not connected" in place of its tick box. A call refused as
+  `server_not_connected` does the same from then on (`lacks`).
 
 ## How the page is put together
 

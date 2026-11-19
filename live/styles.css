@@ -350,12 +350,16 @@ mark.resolved.last::after { content: "✓"; color: var(--done-line); }
 .composer .msg { flex: 1; min-width: 0; height: 38px; max-height: 168px; resize: none; overflow-y: auto; border: 1px solid var(--line); background: transparent; color: var(--ink); border-radius: 19px; padding: 8px 15px; font: inherit; line-height: 1.45; }
 .composer .msg:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
 .composer form .btn { height: 38px; border-radius: 999px; padding: 0 16px; }
-.opts { display: flex; align-items: center; gap: 12px; margin-top: 8px; font-size: 12.5px; color: var(--muted); }
+.opts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 8px; font-size: 12.5px; color: var(--muted); }
 .opts:not(:has(> :not(.grow))) { display: none; }
 .opts .grow { flex: 1; }
 .opts .linkbtn { color: var(--muted); font-size: 12.5px; }
 .toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .toggle input { margin: 0; accent-color: var(--accent); }
+/* A place to look whose connector the viewer has not added. */
+.toggle.off { border: 0; background: none; padding: 0; font: inherit; color: var(--muted); opacity: 0.75; }
+.toggle.off small { font-size: 11px; background: var(--chip); border-radius: 999px; padding: 0 7px; }
+.sources + .sources { margin-top: 6px; }
 
 /* the message box while it takes an explanation ("Explain it back") */
 .backbar { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; font-size: 12.5px; color: var(--muted); }

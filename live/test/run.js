@@ -3,8 +3,9 @@
 //
 //     node live/test/run.js          (or: npm test)
 //
-//   1. the parsing tests (parse.test.js) and the Notion tests
-//      (notion.test.js), which need nothing but Node;
+//   1. the parsing tests (parse.test.js), the Notion tests
+//      (notion.test.js) and the web tests (web.test.js), which need
+//      nothing but Node;
 //   2. the static check: ESLint with two rules, a name that hides an outer
 //      name (no-shadow) and a name used before it is defined
 //      (no-use-before-define). It runs if an ESLint is found, in
@@ -28,7 +29,7 @@ function step(name, fn) {
   results.push({ name, ...out });
 }
 
-for (const [name, file] of [['Parsing tests', 'parse.test.js'], ['Notion tests', 'notion.test.js']]) {
+for (const [name, file] of [['Parsing tests', 'parse.test.js'], ['Notion tests', 'notion.test.js'], ['Web tests', 'web.test.js']]) {
   step(name, () => {
     const r = spawnSync(process.execPath, ['--test', path.join(__dirname, file)], { cwd: ROOT, stdio: 'inherit' });
     return { ok: r.status === 0 };

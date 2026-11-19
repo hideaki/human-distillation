@@ -1,11 +1,12 @@
 # Testing
 
-Four layers. The first three need nothing installed.
+Five layers. The first four need nothing installed.
 
 | Layer | What it checks | How to run it |
 | --- | --- | --- |
 | Parsing tests | How the text Claude writes is read: paragraphs, lists, code, diagrams, formulas, money, the `@@@` trailer | `npm test` |
 | Notion tests | How a Notion page is handed to Claude: a long one in parts, what one answer may read, what travels to the next question | `npm test` |
+| Web tests | How the web is searched and read for Claude, which addresses may be read, and what happens when a connector is not there | `npm test` |
 | Static check | A name that hides an outer name, a name used before it is defined | `npm test` (needs an ESLint, see below) |
 | Flow tests | The real page, clicked through against the stand-in for Claude | open `/test` in the Browser pane |
 
@@ -21,8 +22,8 @@ npm test
 ```
 
 This is `node live/test/run.js`. It runs the parsing tests, the Notion tests,
-then the static check, and prints a summary. It exits with an error if any
-fails.
+the web tests, then the static check, and prints a summary. It exits with an
+error if any fails.
 
 ## Parsing tests
 
@@ -52,6 +53,20 @@ each test says, and its `mcp` returns the pages the test gives it. It checks
 that a long page comes in parts that each fit a tool result and together are
 the whole page, the list of what each part holds, the limit on what one answer
 reads, and what is kept with the answer for later questions.
+
+## Web tests
+
+```bash
+node --test live/test/web.test.js
+```
+
+`live/test/web.test.js` runs `llm.js` whole in the same way. Its `mcp` answers
+as the Parallel Search connector does (the shapes are the ones the real
+connector returned on 2026-11-19). It checks what a search and a page hand to
+Claude, that a long web page comes in parts, that `web_fetch` reads only an
+address the person, a search result or a page gave, what travels to the next
+question, and that a connector the viewer has not added is neither offered
+nor called.
 
 ## Static check
 
@@ -103,6 +118,12 @@ Options, as query parameters:
 - `/test?only=formula` runs the tests whose name contains those words.
 - `/test?page=built` drives the single file that gets published. Run
   `python3 live/build.py` first.
+
+A test can load the page for a viewer who lacks a connector:
+`given('main', { query: 'missing=web' })`. The stand-in reads this from the
+address of the page (`missing=` for a connector that is not listed, `gone=`
+for one that is listed but refuses calls; `web`, `notion`, or both with a
+comma).
 
 The Browser pane does not have to be showing. The tests poll instead of
 sleeping, and transitions are switched off in the page under test (see
@@ -157,6 +178,7 @@ end of the grid section then runs every pair.
 
     live/test/parse.test.js   the parsing tests
     live/test/notion.test.js  the Notion tests
+    live/test/web.test.js     the web tests
     live/test/extract.js      gets the app's pure functions into Node
     live/test/eslintrc.json   the two rules of the static check
     live/test/run.js          the one command (npm test)

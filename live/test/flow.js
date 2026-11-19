@@ -100,7 +100,8 @@
     }
     frame.style.width = (o.width || 1440) + 'px';
     frame.style.height = (o.height || 900) + 'px';
-    await navigate(`${TARGET}?load=${++loads}`);
+    // o.query goes to the stand-in: which connectors the viewer lacks.
+    await navigate(`${TARGET}?load=${++loads}${o.query ? '&' + o.query : ''}`);
     win = frame.contentWindow;
     doc = win.document;
     ok(win.__errors && win.__calls, 'The probe did not load with the page');
@@ -1294,6 +1295,129 @@
     has(sent, '[For this question this page of my Notion was read and shown to you.', 'The pointed question is told what was read');
     has(sent, 'read it again with notion_fetch.]\n--- 1. “Placeholder page 1” (https://www.notion.so/placeholder-1): read whole\n# Placeholder page 1', 'It is told it may read again, and gets the page');
     eq($$(`.turn[data-node="${side}"] .sources a.src`).length, 1, 'The page the side thread read itself is shown under its answer');
+  });
+
+  // ----- The web -----
+
+  const lookBox = (what, start) => $(`.composer .toggle input[data-pref="${what}"]`, pane(start || 'root'));
+  const sourceRows = id => $$(`.turn[data-node="${id}"] .sources`);
+
+  test('Web', 'with "Search the web" ticked, the stand-in searches, reads a page, and the sources are shown', async () => {
+    await given('main');
+    ok(lookBox('web'), 'The "Search the web" box is offered');
+    await click(lookBox('web'), 'the "Search the web" box');
+    ok(lookBox('web').checked && store().prefs.web === true && !lookBox('notion').checked && !store().prefs.notion, 'The choice is kept, and the Notion box is left alone');
+    const id = await sendIn('root', 'What is new in distillation #web');
+    await until(() => sourceRows(id).length, 'the search to show while it runs', 10000);
+    const n = await answered(id);
+    await drawn();
+    ok(n.web && !n.notion && lastCall().tools, 'The question was sent with the web tools');
+    same(sourceRows(id).map(r => txt($('.k', r))), ['Web'], 'One row of sources, for the web');
+    has(txt(sourceRows(id)[0]), 'Searched “What is new in”, 3 found', 'The search');
+    const link = $('a.src', sourceRows(id)[0]);
+    same([txt(link), link.href, link.target], ['Placeholder web page 1', 'https://example.org/placeholder-1', '_blank'], 'The page that was read');
+    has(txt(answerText(id)), 'From the web the stand-in read: “Placeholder web page 1”', 'The answer');
+    same(n.sources.map(s => [s.kind, s.from, s.state]), [['search', 'web', 'done'], ['page', 'web', 'done']], 'The sources kept with the answer');
+    ok($$('a', answerText(id)).some(a => a.href === 'https://example.org/placeholder-1' && txt(a) === 'Placeholder web page 1'), 'The page named in the answer, as a link');
+    const told = lastCall().turns[0].content;
+    has(told, '- You can search the web with web_search', 'Claude is told it may search');
+    has(told, '- Say where each point from the web comes from.', 'and asked to name its sources');
+    ok(!told.includes('Notion'), 'and told nothing about Notion');
+
+    const next = await sendIn(id, 'And what follows from that?');
+    await answered(next);
+    const sent = lastCall().turns.map(x => x.content).join('\n');
+    has(sent, '[For this question this web page was read and shown to you.', 'The next question is told what was read');
+    has(sent, '--- 1. “Placeholder web page 1” (https://example.org/placeholder-1): read whole\n# Placeholder web page 1', 'and gets the page');
+    has(sent, '--- Search for “What is new in”:\n[Placeholder web page 1 about What is new in](https://example.org/placeholder-1)', 'and what the search found, by name and address');
+  });
+
+  test('Web', 'Notion and the web together have a row of sources each, and a long web page is read in parts', async () => {
+    await given('main');
+    await click(lookBox('notion'), 'the "Look in my Notion" box');
+    await click(lookBox('web'), 'the "Search the web" box');
+    ok(lookBox('notion').checked && lookBox('web').checked, 'Both boxes are ticked');
+    const id = await sendIn('root', 'Compare my notion notes with the #web');
+    const n = await answered(id);
+    await drawn();
+    ok(n.web && n.notion, 'The question may look in both');
+    same(sourceRows(id).map(r => [txt($('.k', r)), $$('.src', r).length]), [['Notion', 2], ['Web', 2]], 'A search and a page in each row');
+    has(txt(answerText(id)), 'From Notion the stand-in read:', 'The answer, from Notion');
+    has(txt(answerText(id)), 'From the web the stand-in read:', 'The answer, from the web');
+
+    const long = await sendIn(id, 'Only the start of the long one #web #skim');
+    const m = await answered(long);
+    await drawn();
+    const page = m.sources[1];
+    ok(page.from === 'web' && page.of > 1, `The long web page comes in parts (${page.of})`);
+    same(page.parts, [1], 'The parts read');
+    eq(txt($('a.src', sourceRows(long)[0])), `Placeholder long web page (part 1 of ${page.of})`, 'The source, with parts left unread');
+  });
+
+  test('Web', 'an address in the question is read without a search, and one that nobody gave is refused', async () => {
+    await given('main');
+    await click(lookBox('web'), 'the "Search the web" box');
+    const typed = await sendIn('root', 'Read https://example.org/placeholder-2 for me');
+    let n = await answered(typed);
+    await drawn();
+    same(n.sources.map(s => [s.kind, s.from, s.state, s.url]), [['page', 'web', 'done', 'https://example.org/placeholder-2']], 'The page was read, with no search');
+
+    const forged = await sendIn(typed, 'Now carry it elsewhere #web #forged');
+    n = await answered(forged);
+    await drawn();
+    has(txt(answerText(forged)), 'This address was not given by the person, by a search result or by a page you read, so it is not read.', 'Claude is told why');
+    ok(!n.sources, 'Nothing was fetched, and no source is shown');
+    eq(sourceRows(forged).length, 0, 'No row of sources');
+  });
+
+  test('Web', 'a question asked by pointing uses the web only in a thread that has used it', async () => {
+    await given('main');
+    await click(lookBox('web'), 'the "Search the web" box');
+
+    await click(sentence(mainText(), 'A real answer would open'), 'a sentence of an answer that used nothing');
+    const plain = await explain();
+    ok(!node(plain).web && !lastCall().tools, 'Pointing at an answer that did not use the web asks without the web tools');
+
+    const read = await sendIn('root', 'Find the latest #web');
+    await answered(read);
+    await drawn();
+    await click(sentence(answerText(read), 'From the web the stand-in read'), 'a sentence of the answer that read a web page');
+    const side = await explain();
+    ok(node(side).web && !node(side).notion && lastCall().tools, 'Pointing at an answer that read a web page asks with the web tools');
+    has(lastCall().turns.map(x => x.content).join('\n'), 'read it again with web_fetch.]\n--- 1. “Placeholder web page 1” (https://example.org/placeholder-1): read whole', 'It is told it may read again, and gets the page');
+  });
+
+  test('Web', 'a connector the viewer has not added is not offered, and the message box says how to add it', async () => {
+    await given('main', { query: 'missing=web' });
+    const off = what => $(`.composer .toggle.off[data-missing="${what}"]`, pane('root'));
+    ok(lookBox('notion') && !lookBox('web'), 'Notion is offered, the web is not');
+    eq(txt(off('web')), 'Search the webnot connected', 'In its place: what it is, and that it is not connected');
+    await click(off('web'), '"Search the web", not connected');
+    has(toastText(), 'add the Parallel Search connector in Claude\'s settings', 'Pressing it says what to add');
+
+    await given('main', { query: 'missing=notion,web' });
+    ok(!lookBox('notion') && !lookBox('web') && off('notion') && off('web'), 'With neither connector, neither box');
+    const id = await sendIn('root', 'A question all the same #web');
+    const n = await answered(id);
+    ok(!n.web && !n.notion && !lastCall().tools && !n.sources, 'A question is answered without them');
+
+    await given('main');
+    ok(lookBox('notion') && lookBox('web') && !off('notion') && !off('web'), 'With both connectors, both boxes and no notice');
+  });
+
+  test('Web', 'a connector that turns out to be missing when called is reported once, and then no longer offered', async () => {
+    await given('main', { query: 'gone=web' });
+    await click(lookBox('web'), 'the "Search the web" box');
+    const first = await sendIn('root', 'What is new #web');
+    let n = await answered(first);
+    await drawn();
+    ok(n.web && lastCall().tools, 'The first question was sent with the web tools');
+    has(txt(answerText(first)), 'Web search is not connected for this person. Tell them to add the Parallel Search connector', 'Claude is told, so that it can say so');
+    has(txt(sourceRows(first)[0]), 'failed: Web search is not connected', 'The search shows as failed');
+    await until(() => !lookBox('web') && $('.composer .toggle.off[data-missing="web"]', pane('root')), 'the box to give way to the notice');
+    const second = await sendIn(first, 'And again #web');
+    n = await answered(second);
+    ok(!n.web && !lastCall().tools, 'The next question is asked without them');
   });
 
   test('Conversations', 'new, switch and delete', async () => {

@@ -151,7 +151,7 @@
     let s = null;
     try { s = JSON.parse(localStorage.getItem(KEY)); } catch (e) { s = null; }
     if (!s || s.v !== 1 || !s.convs || typeof s.convs !== 'object') s = { v: 1, current: null, convs: {}, prefs: {} };
-    s.prefs = { level: 1, tier: 'default', notion: false, known: {}, ...(s.prefs || {}) };
+    s.prefs = { level: 1, tier: 'default', notion: false, web: false, known: {}, ...(s.prefs || {}) };
     if (!s.prefs.known || typeof s.prefs.known !== 'object') s.prefs.known = {};
     Object.values(s.convs).forEach(c => {
       c.nodes = c.nodes || {};
@@ -1027,6 +1027,7 @@
       level: prefs.level,
       known: Object.keys(prefs.known),
       notion: !!n.notion,
+      web: !!n.web,
       tier: prefs.tier,
       effort: n.verb || n.back ? 'low' : null, // one-click questions and checks should come back quickly
       signal: ctl.signal,
@@ -1089,7 +1090,7 @@
     state.title = clip(text.replace(/\s+/g, ' '), 90);
     state.nodes.root = {
       id: 'root', seq: 0, parent: null, anchor: null, q: text, prompt: text,
-      raw: '', phase: 'pending', status: 'open', ready: true, notion: wantNotion(),
+      raw: '', phase: 'pending', status: 'open', ready: true, ...looks(),
     };
     state.cols = [{ start: 'root', leaf: 'root' }];
     state.updated = Date.now();
@@ -1099,12 +1100,20 @@
     render();
   }
 
+  // Where Claude may look for a question: in the reader's Notion, on the
+  // web. Each needs its box ticked and its connector.
   const wantNotion = () => !!(prefs.notion && LLM.rt.notion);
+  const wantWeb = () => !!(prefs.web && LLM.rt.web);
+  const looks = () => ({ notion: wantNotion(), web: wantWeb() });
   // A question asked by pointing or with one click should come back quickly.
   // So unless the reader typed it, it looks in Notion only where the thread
-  // it joins has read a page there already, which it may need to read again.
-  const readNotion = id => pathTo(id).some(x => (N(x).sources || []).some(s => s.kind === 'page' && s.state === 'done'));
+  // it joins has read a page there already, which it may need to read again,
+  // and on the web only where that thread has searched or read there.
+  const drewOn = (id, test) => pathTo(id).some(x => (N(x).sources || []).some(s => s.state === 'done' && test(s)));
+  const readNotion = id => drewOn(id, s => s.kind === 'page' && s.from !== 'web');
   const notionFor = (parent, typed) => wantNotion() && (!!typed || readNotion(parent));
+  const webFor = (parent, typed) => wantWeb() && (!!typed || drewOn(parent, s => s.from === 'web'));
+  const looksFor = (parent, typed) => ({ notion: notionFor(parent, typed), web: webFor(parent, typed) });
 
   // Point at a passage and ask about it: a branch attached to that passage.
   // `question` is what the reader typed, or '' for "Explain further".
@@ -1126,14 +1135,14 @@
           : typed ? LLM.askPrompt(p.text, typed) : term ? LLM.termPrompt(term) : LLM.passagePrompt(p.text, 'explain'),
         status: later ? 'queued' : 'open',
         ready: false,
-        notion: notionFor(p.nodeId, typed),
+        ...looksFor(p.nodeId, typed),
       });
       runNode(n.id);
     } else if (typed) {
       // The passage already has a thread: the question continues it.
       const end = N(tipOf(n.id));
       if (busy(end)) { toast('That thread is still being answered. Ask again in a moment.'); return; }
-      const m = newNode({ parent: end.id, q: typed, notion: wantNotion(), prompt: n.anchor.part ? LLM.partPrompt(n.anchor.text, typed) : n.anchor.sym ? LLM.symbolPrompt(n.anchor.sym, n.anchor.text, typed) : n.anchor.math ? LLM.formulaPrompt(n.anchor.text, typed) : LLM.askPrompt(n.anchor.text, typed) });
+      const m = newNode({ parent: end.id, q: typed, ...looks(), prompt: n.anchor.part ? LLM.partPrompt(n.anchor.text, typed) : n.anchor.sym ? LLM.symbolPrompt(n.anchor.sym, n.anchor.text, typed) : n.anchor.math ? LLM.formulaPrompt(n.anchor.text, typed) : LLM.askPrompt(n.anchor.text, typed) });
       state.tips[n.id] = m.id;
       focusId = m.id;
       if (n.status === 'resolved') n.status = 'open';
@@ -1171,7 +1180,7 @@
     render();
   }
 
-  const send = (ci, text) => addTurn(ci, { q: text, prompt: text, notion: wantNotion() });
+  const send = (ci, text) => addTurn(ci, { q: text, prompt: text, ...looks() });
 
   // Go back to an earlier message; what came after it becomes a stub there.
   function continueFrom(ci, id) {
@@ -1538,7 +1547,7 @@
     const job = live[liveKey(state, n.id)];
     const working = busy(n);
 
-    if (working && job && job.sources.length) ai.append(sources(job.sources));
+    if (working && job && job.sources.length) ai.append(...sources(job.sources));
     if (n.raw) ai.append(buildText(n));
     if (working) {
       ai.append(el('div.working', { role: 'status' },
@@ -1559,7 +1568,7 @@
       ai.append(el('div.fine', {}, n.raw ? 'Stopped part-way. ' : 'Stopped before anything was written. ', again));
     }
     if (n.truncated) ai.append(el('div.fine', {}, 'This answer reached the length limit and stops early. Ask for the rest, or for less at a time.'));
-    if (n.sources && n.sources.length) ai.append(sources(n.sources));
+    if (n.sources && n.sources.length) ai.append(...sources(n.sources));
 
     // Other branches that leave from this message, and the way back to it.
     const others = typedKids(n.id).filter(k => k.id !== path[i + 1]);
@@ -1581,9 +1590,15 @@
     return ai;
   }
 
-  // What was looked up in Notion for an answer.
+  // What was looked up for an answer: one row for Notion, one for the web.
   function sources(list) {
-    const box = el('div.sources', {}, el('span.k', {}, 'Notion'));
+    return [['Notion', list.filter(s => s.from !== 'web')], ['Web', list.filter(s => s.from === 'web')]]
+      .filter(([, some]) => some.length)
+      .map(([where, some]) => sourceRow(where, some));
+  }
+
+  function sourceRow(where, list) {
+    const box = el('div.sources', {}, el('span.k', {}, where));
     list.forEach(s => {
       const failed = s.state === 'error' && clip(s.error || 'no reason given', 90);
       if (s.kind === 'search') {
@@ -1598,7 +1613,7 @@
       } else {
         // A long page is read in parts. Say so when some were left unread.
         const some = s.of > 1 && s.parts && s.parts.length < s.of ? ` (${LLM.partSpan(s.parts)} of ${s.of})` : '';
-        const name = clip(s.title || 'Notion page', 60) + some;
+        const name = clip(s.title || where + ' page', 60) + some;
         box.append(/^https:\/\//.test(s.url || '')
           ? el('a.src', { href: s.url, target: '_blank', rel: 'noopener noreferrer' }, name)
           : el('span.src', {}, name));
@@ -1696,7 +1711,7 @@
       const asked = new Set(path.map(id => N(id).verb));
       Object.keys(VERBS).filter(v => v !== 'explain' && !asked.has(v)).slice(0, 3).forEach(v => out.push({
         label: VERBS[v].q,
-        run: () => addTurn(ci, { q: VERBS[v].q, verb: v, prompt: LLM.followPrompt(about(start.anchor), v), notion: notionFor(col.leaf, false) }),
+        run: () => addTurn(ci, { q: VERBS[v].q, verb: v, prompt: LLM.followPrompt(about(start.anchor), v), ...looksFor(col.leaf, false) }),
       }));
     }
     const taken = new Set(typedKids(leaf.id).map(k => k.q));
@@ -1707,6 +1722,12 @@
     }
     return out;
   }
+
+  // The places Claude may look, each with a box to tick under the message box.
+  const LOOKUPS = [
+    { pref: 'notion', label: 'Look in my Notion', connector: 'Notion', title: 'Let Claude search and read your Notion for your questions, through the connection you already have in Claude' },
+    { pref: 'web', label: 'Search the web', connector: LLM.WEB, title: `Let Claude search the web and read web pages for your questions, through the ${LLM.WEB} connector you have in Claude` },
+  ];
 
   // The parts of a message box that change while an answer is being written.
   function composerParts(col, ci, path) {
@@ -1722,17 +1743,24 @@
     }
 
     const opts = el('div.opts');
-    if (LLM.rt.notion && !back) {
-      const cb = el('input', { type: 'checkbox', id: 'notion-' + key });
-      cb.checked = !!prefs.notion;
-      cb.addEventListener('change', () => {
-        prefs.notion = cb.checked;
-        save();
-        document.querySelectorAll('.opts input[type="checkbox"]').forEach(x => { x.checked = cb.checked; });
+    if (!back) {
+      LOOKUPS.forEach(k => {
+        if (LLM.rt[k.pref]) {
+          const cb = el('input', { type: 'checkbox', id: k.pref + '-' + key, 'data-pref': k.pref });
+          cb.checked = !!prefs[k.pref];
+          cb.addEventListener('change', () => {
+            prefs[k.pref] = cb.checked;
+            save();
+            document.querySelectorAll(`.opts input[data-pref="${k.pref}"]`).forEach(x => { x.checked = cb.checked; });
+          });
+          opts.append(el('label.toggle', { title: k.title }, cb, el('span', {}, k.label)));
+        } else if (LLM.rt.missing[k.pref]) {
+          // The viewer has not added the connector: say so, and how, when asked.
+          const how = `To use “${k.label}”, add the ${k.connector} connector in Claude's settings, under Connectors. Then reload this page.`;
+          opts.append(el('button.toggle.off', { type: 'button', title: how, 'data-missing': k.pref, on: { click: () => toast(how) } },
+            el('span', {}, k.label), el('small', {}, 'not connected')));
+        }
       });
-      opts.append(el('label.toggle', {
-        title: 'Let Claude search and read your Notion for your questions, through the connection you already have in Claude',
-      }, cb, el('span', {}, 'Look in my Notion')));
     }
     opts.append(el('span.grow'));
     if (col && !back && path.some(id => N(id).raw)) {

@@ -1,7 +1,7 @@
 # Human Distillation
 
-A prototype of a chat with Claude for understanding hard ideas, in which any
-part of an answer can be asked about on its own: a sentence, a formula, one
+A prototype of an AI chat optimized for understanding hard ideas, in which any
+part of an AI's answer can be asked about on its own: a sentence, a formula, one
 symbol in it, a box of a diagram.
 
 ## The problem to solve
@@ -29,7 +29,7 @@ account, so it needs one and counts against your usage.
 
 ## What it is
 
-A prototype of a chat for understanding complex ideas with Claude.
+A prototype of an AI chat for understanding complex ideas, implemented as a Claude Artifact.
 
 It looks like an ordinary chat, and any part of an answer can be asked about
 on its own: a sentence, a few highlighted words, a formula, one symbol in a

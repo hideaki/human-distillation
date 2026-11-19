@@ -1100,6 +1100,11 @@
   }
 
   const wantNotion = () => !!(prefs.notion && LLM.rt.notion);
+  // A question asked by pointing or with one click should come back quickly.
+  // So unless the reader typed it, it looks in Notion only where the thread
+  // it joins has read a page there already, which it may need to read again.
+  const readNotion = id => pathTo(id).some(x => (N(x).sources || []).some(s => s.kind === 'page' && s.state === 'done'));
+  const notionFor = (parent, typed) => wantNotion() && (!!typed || readNotion(parent));
 
   // Point at a passage and ask about it: a branch attached to that passage.
   // `question` is what the reader typed, or '' for "Explain further".
@@ -1121,13 +1126,14 @@
           : typed ? LLM.askPrompt(p.text, typed) : term ? LLM.termPrompt(term) : LLM.passagePrompt(p.text, 'explain'),
         status: later ? 'queued' : 'open',
         ready: false,
+        notion: notionFor(p.nodeId, typed),
       });
       runNode(n.id);
     } else if (typed) {
       // The passage already has a thread: the question continues it.
       const end = N(tipOf(n.id));
       if (busy(end)) { toast('That thread is still being answered. Ask again in a moment.'); return; }
-      const m = newNode({ parent: end.id, q: typed, prompt: n.anchor.part ? LLM.partPrompt(n.anchor.text, typed) : n.anchor.sym ? LLM.symbolPrompt(n.anchor.sym, n.anchor.text, typed) : n.anchor.math ? LLM.formulaPrompt(n.anchor.text, typed) : LLM.askPrompt(n.anchor.text, typed) });
+      const m = newNode({ parent: end.id, q: typed, notion: wantNotion(), prompt: n.anchor.part ? LLM.partPrompt(n.anchor.text, typed) : n.anchor.sym ? LLM.symbolPrompt(n.anchor.sym, n.anchor.text, typed) : n.anchor.math ? LLM.formulaPrompt(n.anchor.text, typed) : LLM.askPrompt(n.anchor.text, typed) });
       state.tips[n.id] = m.id;
       focusId = m.id;
       if (n.status === 'resolved') n.status = 'open';
@@ -1690,7 +1696,7 @@
       const asked = new Set(path.map(id => N(id).verb));
       Object.keys(VERBS).filter(v => v !== 'explain' && !asked.has(v)).slice(0, 3).forEach(v => out.push({
         label: VERBS[v].q,
-        run: () => addTurn(ci, { q: VERBS[v].q, verb: v, prompt: LLM.followPrompt(about(start.anchor), v) }),
+        run: () => addTurn(ci, { q: VERBS[v].q, verb: v, prompt: LLM.followPrompt(about(start.anchor), v), notion: notionFor(col.leaf, false) }),
       }));
     }
     const taken = new Set(typedKids(leaf.id).map(k => k.q));
@@ -1725,7 +1731,7 @@
         document.querySelectorAll('.opts input[type="checkbox"]').forEach(x => { x.checked = cb.checked; });
       });
       opts.append(el('label.toggle', {
-        title: 'Let Claude search and read your Notion for the questions you type, through the connection you already have in Claude',
+        title: 'Let Claude search and read your Notion for your questions, through the connection you already have in Claude',
       }, cb, el('span', {}, 'Look in my Notion')));
     }
     opts.append(el('span.grow'));

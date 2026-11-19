@@ -1272,6 +1272,26 @@
     has(sent, 'part 1: Placeholder long page; Section 1: 定常作業 1', 'The list of what each part holds');
   });
 
+  test('Notion', 'a question asked by pointing looks in Notion only in a thread that has read a page there', async () => {
+    await given('main');
+    await click($('.composer .toggle input', pane('root')), 'the "Look in my Notion" box');
+
+    await click(sentence(mainText(), 'A real answer would open'), 'a sentence of an answer that read nothing');
+    const plain = await explain();
+    ok(!node(plain).notion && !lastCall().tools, 'Pointing at an answer that read nothing in Notion asks without the Notion tools');
+
+    const read = await sendIn('root', 'Find the roadmap in my notion');
+    await answered(read);
+    await drawn();
+    await click(sentence(answerText(read), 'From Notion the stand-in read'), 'a sentence of the answer that read a page');
+    const side = await explain();
+    ok(node(side).notion && lastCall().tools, 'Pointing at an answer that read a page asks with the Notion tools');
+    const sent = lastCall().turns.map(x => x.content).join('\n');
+    has(sent, '[For this question this page of my Notion was read and shown to you.', 'The pointed question is told what was read');
+    has(sent, 'read it again with notion_fetch.]\n--- 1. “Placeholder page 1” (https://www.notion.so/placeholder-1)\n# Placeholder page 1', 'It is told it may read again, and gets the page');
+    eq($$(`.turn[data-node="${side}"] .sources a.src`).length, 1, 'The page the side thread read itself is shown under its answer');
+  });
+
   test('Conversations', 'new, switch and delete', async () => {
     await load();
     await askFirst('A first topic');

@@ -111,32 +111,41 @@ const LLM = (() => {
     return lines.join('\n');
   }
 
-  // Pages the app read from Notion for an earlier question travel with that
-  // question, so later questions on the same path can still draw on them.
-  function refs(sources) {
-    const pages = (sources || []).filter(s => s.kind === 'page' && s.text);
+  // What an earlier answer read in Notion travels with its question, so that
+  // later questions on the same path can draw on it. Every page it read is
+  // named, with the start of its text. `brief` names the pages and leaves the
+  // text out. `notion` says whether the question now asked may read again.
+  function refs(sources, notion, brief) {
+    const pages = (sources || []).filter(s => s.kind === 'page' && s.state === 'done');
     if (!pages.length) return '';
-    return '\n\n[For this question the app read these pages from my Notion and showed them to you]\n'
-      + pages.map(s => `--- ${s.title || 'Notion page'}${s.url ? ' (' + s.url + ')' : ''}\n${s.text}`).join('\n');
+    const name = s => `“${s.title || 'Notion page'}”${s.url ? ' (' + s.url + ')' : ''}`
+      + (s.of > 1 && s.parts ? (s.parts.length === s.of ? `, all ${s.of} parts` : `, ${partSpan(s.parts)} of ${s.of}`) : '');
+    const which = pages.length === 1 ? 'this page of my Notion was' : `these ${pages.length} pages of my Notion were`;
+    const again = notion
+      ? 'If you need more of a page than is repeated here, read it again with notion_fetch.'
+      : 'If a question needs something that is not repeated here, say that this part of the page is not in front of you now, and that I can ask again with "Look in my Notion" ticked. Do not say that the page was not read.';
+    if (brief) return `\n\n[For this question ${which} read and shown to you: ${pages.map(name).join('; ')}. To save space their text is not repeated here. ${again}]`;
+    return `\n\n[For this question ${which} read and shown to you. To save space, a long one is repeated below only in part, and a note says where it stops. ${again}]\n`
+      + pages.map((s, i) => `--- ${i + 1}. ${name(s)}\n${s.text || '[Not repeated here.]'}`).join('\n');
   }
 
   // Claude keeps nothing between calls: every question is sent with the turns
-  // that lead to it. If that grows past the limit, trim from the oldest end,
-  // first the looked-up pages and then whole turns.
+  // that lead to it. If that grows past the limit, trim from the oldest end:
+  // first the looked-up pages are cut down to their names, then whole turns go.
   function turnsFor(o) {
     const cap = ((rt.limits && rt.limits.maxPromptBytes) || 262144) - 6000;
     const hist = (o.history || []).filter(h => h.prompt);
-    for (let noRefs = 0, drop = 0; ;) {
+    for (let brief = 0, drop = 0; ;) {
       const turns = [{ role: 'user', content: rules(o) }];
       if (drop) turns.push({ role: 'user', content: '(The earliest messages of this conversation were left out to save space.)' });
       hist.forEach((h, i) => {
         if (i < drop) return;
-        turns.push({ role: 'user', content: h.prompt + (i < noRefs ? '' : refs(h.sources)) });
+        turns.push({ role: 'user', content: h.prompt + refs(h.sources, o.notion, i < brief) });
         if (h.raw) turns.push({ role: 'assistant', content: h.raw });
       });
       turns.push({ role: 'user', content: o.prompt });
       if (turns.reduce((a, t) => a + bytes(t.content), 0) <= cap) return turns;
-      if (noRefs < hist.length) noRefs++;
+      if (brief < hist.length) brief++;
       else if (drop < hist.length - 1) drop++;
       else return turns;
     }
@@ -147,9 +156,10 @@ const LLM = (() => {
   // What a page function hands back to Claude may be 32 KB once JSON-encoded.
   // RESULT stays under that. A page longer than RESULT is read in parts: PART
   // is the text of one, which leaves room for the notes around it, of which
-  // OUTLINE is the list of what each part holds. CARRY is how much of a page
-  // travels on with the answer for later questions.
-  const RESULT = 30000, PART = 25000, OUTLINE = 3000, CARRY = 12000;
+  // OUTLINE is the list of what each part holds. CARRY is how much of the
+  // pages one answer read travels on with it for later questions, shared
+  // between those pages.
+  const RESULT = 30000, PART = 25000, OUTLINE = 3000, CARRY = 60000;
   // The most page text one answer may read, in bytes. Every round sends all
   // of it to Claude again, on top of the turns of the thread.
   const READ = 180000, READ_LEAST = 60000;
@@ -263,21 +273,28 @@ const LLM = (() => {
   function notionTools(sources, note, room) {
     // The pages read for this answer. A page is fetched once, however many
     // of its parts are asked for, so that the parts stay those of one text.
-    const pages = new Map(); // id -> { src, got: its parts, read: part -> text, busy, told }
+    const pages = new Map(); // id -> { src, got: its parts, parts, read: part -> text, busy, told }
     let spent = 0;
 
-    // What travels on with the answer: the start of what was read and, for
-    // a page in parts, which parts those were and what the others hold.
-    const carried = (p, parts) => {
-      const ks = [...p.read.keys()].sort((a, b) => a - b);
-      const text = ks.map((k, i) => (i && ks[i - 1] !== k - 1 ? '\n[…]\n' : '') + p.read.get(k)).join('');
-      if (parts.length === 1) return capJson(text, CARRY, '\n[The rest of this page was left out.]');
-      p.src.parts = ks;
-      p.src.of = parts.length;
-      const which = ks.length === parts.length ? 'All of them were' : `Only ${partSpan(ks)} of ${parts.length} ${ks.length === 1 ? 'was' : 'were'}`;
-      return `[This page is long and comes in ${parts.length} parts. ${which} read for this answer, and what follows is the start of that.]\n`
-        + `[What each part holds:\n${outlineOf(parts)}]\n`
-        + capJson(text, CARRY, '\n[The rest of what was read was left out.]');
+    // What travels on with the answer for later questions: the text of every
+    // page read, as far as CARRY goes. The pages share it. One that needs
+    // less than its share leaves the rest to the longer ones, so short pages
+    // go whole and long ones are cut. A page in parts also says which parts
+    // were read and what the others hold.
+    const settle = () => {
+      const list = [...pages.values()].filter(p => p.read.size).map(p => {
+        const ks = [...p.read.keys()].sort((a, b) => a - b), n = p.parts.length;
+        const text = ks.map((k, i) => (i && ks[i - 1] !== k - 1 ? '\n[…]\n' : '') + p.read.get(k)).join('');
+        const which = ks.length === n ? 'All of them were' : `Only ${partSpan(ks)} of ${n} ${ks.length === 1 ? 'was' : 'were'}`;
+        const head = n === 1 ? '' : `[This page is long and comes in ${n} parts. ${which} read for this answer.]\n[What each part holds:\n${outlineOf(p.parts)}]\n`;
+        return { p, head, text, want: bytes(head) + jsonSize(text) - 2 };
+      }).sort((a, b) => a.want - b.want);
+      let left = CARRY;
+      list.forEach((x, i) => {
+        const got = Math.min(x.want, Math.floor(left / (list.length - i)));
+        left -= got;
+        x.p.src.text = x.head + capJson(x.text, Math.max(0, got - bytes(x.head)) + 2, x.head ? '\n[What was read goes on from here. The rest is not repeated.]' : '\n[The page goes on from here. The rest is not repeated.]');
+      });
     };
 
     const call = async (tool, input, signal) => {
@@ -290,7 +307,7 @@ const LLM = (() => {
       try { const out = await run(); src.state = 'done'; note(); return out; }
       catch (e) { src.state = 'error'; src.error = e.message; note(); throw e; }
     };
-    return [
+    const tools = [
       {
         name: 'notion_search',
         description: 'Search this person\'s Notion workspace by keywords. Returns matching pages with title, URL, location and a short highlight. Use it to find a page before reading it with notion_fetch.',
@@ -331,7 +348,8 @@ const LLM = (() => {
             p.got = call('notion-fetch', { id }, ctx && ctx.signal).then(r => {
               const text = resultText(r);
               Object.assign(p.src, pageMeta(r, text, id));
-              return partsOf(text);
+              p.parts = partsOf(text);
+              return p.parts;
             });
             pages.set(id, p);
             sources.push(p.src);
@@ -359,7 +377,8 @@ const LLM = (() => {
               if (spent && spent + bytes(body) > room) throw new Error('No more can be read for this one answer. Answer from what you have read, and tell the person which parts you did not read, so that they can ask about those next.');
               spent += bytes(body);
               p.read.set(k, body);
-              src.text = carried(p, parts);
+              // A page that came in parts says which of them were read.
+              if (n > 1) Object.assign(src, { parts: [...p.read.keys()].sort((a, b) => a - b), of: n });
             }
             if (n === 1) return capJson(body, RESULT, '\n[The rest of this page was too long to include.]');
             const name = src.title ? ` of “${clip(src.title, 80)}”` : '';
@@ -382,17 +401,15 @@ const LLM = (() => {
         },
       },
     ];
+    return { tools, settle };
   }
 
-  // What is kept with an answer: enough to show the sources and to carry up to
-  // three pages along the path.
+  // What is kept with an answer: enough to show the sources, and to carry
+  // the pages along the path.
   function keep(sources) {
-    let pages = 0;
     return sources.map(s => {
       if (s.kind === 'search') return { kind: 'search', query: s.query, hits: s.hits, state: s.state, error: s.error };
-      const text = s.state === 'done' && pages++ < 3 ? s.text : '';
-      const page = { kind: 'page', title: s.title, url: s.url, state: s.state, error: s.error, text };
-      // A page that came in parts says which of them were read.
+      const page = { kind: 'page', title: s.title, url: s.url, state: s.state, error: s.error, text: s.state === 'done' ? s.text : '' };
       if (s.of > 1) Object.assign(page, { parts: s.parts, of: s.of });
       return page;
     });
@@ -413,10 +430,12 @@ const LLM = (() => {
     if (o.effort) opts.effort = o.effort;
     let notion = !!(o.notion && rt.notion);
     const turns = turnsFor({ ...o, notion });
+    let kit = null;
     if (notion) {
       // Pages may fill what the thread leaves of the largest prompt, within limits.
       const left = ((rt.limits && rt.limits.maxPromptBytes) || 262144) - turns.reduce((a, t) => a + bytes(t.content), 0);
-      opts.tools = notionTools(sources, () => { if (o.onTool) o.onTool(sources.slice()); }, Math.max(READ_LEAST, Math.min(READ, left)));
+      kit = notionTools(sources, () => { if (o.onTool) o.onTool(sources.slice()); }, Math.max(READ_LEAST, Math.min(READ, left)));
+      opts.tools = kit.tools;
     }
     let res;
     try {
@@ -432,6 +451,7 @@ const LLM = (() => {
       delete opts.tools;
       res = await rt.sample(turnsFor({ ...o, notion: false }), opts);
     }
+    if (kit) kit.settle();
     return { raw: res.text, truncated: !!res.truncated, tier: res.modelTierApplied || null, sources: keep(sources) };
   }
 

@@ -98,9 +98,11 @@ You need Claude Code, signed in to your Claude account. To read Notion or
 search the web you also need that connector, Notion or Parallel Search, added
 in Claude's settings under Connectors. Each is optional.
 
-1. Build the file that is published:
+1. Get the code and build the file that is published:
 
    ```bash
+   git clone https://github.com/hideaki/human-distillation.git
+   cd human-distillation
    python3 live/build.py
    ```
 

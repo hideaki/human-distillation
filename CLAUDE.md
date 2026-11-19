@@ -168,9 +168,9 @@ uses the user's existing connections with no sign-in of its own.
 ## Working rules here
 
 - Git: commit finished, checked work. A feature goes on its own branch and
-  is merged into `main` when the user says so. The repository is meant for
-  GitHub, where it is public: push only when the user asks, each time, and
-  only `main`.
+  is merged into `main` when the user says so. The repository is public on
+  GitHub (`origin`, github.com/hideaki/human-distillation): push only when
+  the user asks, each time, and only `main`.
 - Nothing private goes into a tracked file or a commit message: no key, no
   address of the user's, nothing read in their Notion. Fixtures and the
   stand-in use made-up pages.

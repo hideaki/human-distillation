@@ -16,6 +16,8 @@ smaller window, so they are a little larger. [The same as MP4](docs/demo.mp4).*
 on a worked example. A question of your own is answered by Claude on your own
 account, so it needs one and counts against your usage.
 
+## The problem to solve
+
 Learning and understanding things through conversation with an AI is
 becoming the main way for a person to learn something new, and the most
 efficient one.

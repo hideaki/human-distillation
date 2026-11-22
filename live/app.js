@@ -56,7 +56,7 @@
   // later column starts at a turn attached to a passage in the column before.
 
   let store, state, prefs;
-  const ui = { pending: null, back: {}, shown: [], shownConv: null, places: {}, resizing: false, focus: null, focusInput: null, glossPinned: false, confirmDel: null };
+  const ui = { pending: null, back: {}, shown: [], shownConv: null, places: {}, resizing: false, focus: null, focusInput: null, glossPinned: false, confirmDel: null, unfolded: {} };
   const live = {}; // answers being written: "<conversation>/<turn>" -> { ctl, sources }
 
   const N = id => state.nodes[id];
@@ -1523,7 +1523,8 @@
       if (ui.focus && ui.focus.start === key) {
         const t = body.querySelector(`.turn[data-node="${ui.focus.node}"]`);
         if (ui.focus.end) body.scrollTop = t ? Math.max(0, t.offsetTop + t.offsetHeight - body.clientHeight + 24) : body.scrollHeight;
-        else body.scrollTop = t && t.previousElementSibling ? t.offsetTop - 12 : 0;
+        // The first turn starts the view, and so does one under the folded summary.
+        else body.scrollTop = t && t.previousElementSibling && !t.previousElementSibling.classList.contains('summary') ? t.offsetTop - 12 : 0;
       } else if (scrolls[key] != null) {
         body.scrollTop = scrolls[key];
         const was = places[key];
@@ -1658,9 +1659,31 @@
         el('span', {}, rich(start.takeaway || '')),
         el('button.linkbtn', { on: { click: () => { start.status = 'open'; render(); } } }, 'Reopen')));
     }
+    // A conversation that was sent here with a summary of the earlier chat.
+    const sum = !start.parent && start.given ? LLM.summaryIn(start.prompt) : '';
+    if (sum) body.append(summaryBox(sum));
     path.forEach((id, i) => body.append(turn(N(id), ci, path, i)));
     p.append(body, composer(col, ci, path));
     return p;
+  }
+
+  // The summary of the earlier chat that came with a sent conversation: one
+  // line until it is clicked. Claude is given it with every question here, so
+  // the reader can see what that is. It is text to read, not to point at.
+  function summaryBox(text) {
+    const open = !!ui.unfolded[state.id];
+    const box = el('div.summary', { class: open ? 'open' : '' });
+    box.append(el('button.linkbtn', {
+      type: 'button', 'aria-expanded': String(open),
+      // Unfolded in place: the thread below keeps its drafts and its scroll.
+      on: { click: () => { ui.unfolded[state.id] = !open; box.replaceWith(summaryBox(text)); } },
+    }, (open ? '▾ ' : '▸ ') + 'Summary of the earlier chat'));
+    if (open) {
+      const t = el('div.text.static');
+      renderBlocks(t, text, false);
+      box.append(t, el('div.fine', {}, 'Sent along with this conversation. Claude is given it with every question here.'));
+    }
+    return box;
   }
 
   function turn(n, ci, path, i) {

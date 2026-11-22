@@ -167,6 +167,15 @@ const LLM = (() => {
   }
 
   const NO_QUESTION = 'Sent without its question';
+  // What leads into a summary of the earlier chat, inside the first turn.
+  const BEFORE = ' What had been said before, in summary:\n';
+  // The summary that travels in the first turn of a conversation that was
+  // sent here, given that turn's `prompt`; '' when it has none. The page
+  // shows it, since every answer in the conversation is written with it.
+  function summaryIn(prompt) {
+    const at = String(prompt || '').indexOf(BEFORE);
+    return at < 0 || !prompt.endsWith(')') ? '' : prompt.slice(at + BEFORE.length, -1);
+  }
   const words = v => (typeof v === 'string' ? v.replace(/\r/g, '').trim() : '');
 
   // A document of the inbox as the turns of a conversation, or null when it
@@ -192,7 +201,7 @@ const LLM = (() => {
     const k = pairs.length;
     const context = words(data.context);
     const note = `(The app added this note. This conversation began in another chat with you and was sent to this app: ${k === 1 ? 'the answer that follows was' : `the ${k} answers that follow were`} written there. Answer what is asked after ${k === 1 ? 'it' : 'them'} by the instructions above, with the ${SEP} section.`
-      + (context ? ` What had been said before, in summary:\n${clip(context, 20000)}` : '') + ')';
+      + (context ? BEFORE + clip(context, 20000) : '') + ')';
     const turns = pairs.map((t, i) => ({
       q: t.q || NO_QUESTION,
       noq: !t.q,
@@ -865,7 +874,7 @@ const LLM = (() => {
     SEP, VERBS, WEB, rt, ready,
     onChange(fn) { changed = fn; },
     ask, side, parse, partSpan,
-    inbox, discard, fromInbox,
+    inbox, discard, fromInbox, summaryIn,
     passagePrompt, askPrompt, partPrompt, formulaPrompt, symbolPrompt, termPrompt, followPrompt, backPrompt, DRAW, WORDED,
     errorText, isFinal: code => FINAL.has(code),
   };

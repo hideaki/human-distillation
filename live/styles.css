@@ -264,6 +264,11 @@ button.chip:hover:not(:disabled) { outline: 1px solid var(--faint); }
 /* the reader's own explanation, sent to be checked */
 .user.back { flex-direction: column; justify-content: flex-start; align-items: flex-end; }
 .tagline { margin: 0 4px 4px 0; font-size: 11.5px; color: var(--muted); }
+/* the summary of the earlier chat, above a conversation that was sent here */
+.summary { margin-bottom: 18px; border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; }
+.summary .linkbtn { color: var(--muted); text-decoration: none; }
+.summary .linkbtn:hover { color: var(--accent); }
+.summary .text { margin-top: 8px; font-size: 15px; line-height: 1.55; }
 /* an answer that was sent here without the question it replied to */
 .user.none .bubble { background: transparent; border: 1px dashed var(--faint); color: var(--muted); font-size: 13px; }
 .bubble { max-width: 86%; background: var(--chip); border-radius: 16px 16px 4px 16px; padding: 8px 14px; font-size: 15px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }

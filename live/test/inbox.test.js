@@ -59,6 +59,16 @@ test('a summary of what came before travels in the first turn, and is not a turn
   assert.equal(g.turns[0].prompt, 'And colour?\n\n' + NOTE(1) + ' What had been said before, in summary:\nWe had covered waves.)');
 });
 
+test('the summary can be read back from the first turn, for showing it to the reader', () => {
+  const context = 'We had covered waves.\n\nAnd why $c = \\lambda f$ (the basic relation).';
+  const withIt = LLM.fromInbox({ context, question: 'And colour?', answer: 'Its wavelength.' });
+  assert.equal(LLM.summaryIn(withIt.turns[0].prompt), context);
+  const without = LLM.fromInbox({ question: 'And colour?', answer: 'Its wavelength.' });
+  assert.equal(LLM.summaryIn(without.turns[0].prompt), '');
+  assert.equal(LLM.summaryIn('An ordinary question (in brackets)'), '');
+  assert.equal(LLM.summaryIn(undefined), '');
+});
+
 test('a document with no answer in it is not a conversation', () => {
   for (const data of [null, undefined, 'text', 7, [], {}, { answer: '' }, { answer: '   \n' }, { answer: 12 }, { question: 'Only a question' }, { earlier: [{ question: 'a', answer: 'b' }] }]) {
     assert.equal(LLM.fromInbox(data), null, JSON.stringify(data));

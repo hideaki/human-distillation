@@ -137,7 +137,10 @@ uses the user's existing connections with no sign-in of its own.
   `takeDocs` in `app.js` makes the conversation. Its turns have `given: true`
   and were never asked of Claude here; the first one's `prompt` ends with a
   note that says so and asks for the `@@@` section from then on, since the
-  sent answers have none. `store.taken` keeps a document from being opened
+  sent answers have none. A summary of the earlier chat (`context`) also
+  travels in that first `prompt`, and nowhere else: `LLM.summaryIn` reads it
+  back, and the main pane shows it folded above the first turn
+  (`summaryBox`). `store.taken` keeps a document from being opened
   twice in one browser. The document stays in the store until its
   conversation is deleted.
 - Only the artifact's owner can use the inbox: the rule says so, and the

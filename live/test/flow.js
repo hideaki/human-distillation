@@ -1565,6 +1565,42 @@
     same(sentConvs().map(c => c.inbox), ['d2'], 'After a reload it has not come back');
   });
 
+  test('Inbox', 'a summary of the earlier chat is shown folded above the conversation, and goes to Claude with each question', async () => {
+    const context = 'We had covered what a sample mean is.\n\nAnd that its variance is $\\sigma^2 / n$.';
+    await load({ inbox: { d1: { context, question: 'Why the square root?', answer: 'Because a standard deviation is the root of a variance.' } } });
+    await until(() => conv().inbox === 'd1' && $('.turn[data-node="root"]'), 'the document to open as a conversation');
+    const box = () => $('.summary', pane('root'));
+    const fold = () => $('button', box());
+    same([txt(fold()), fold().getAttribute('aria-expanded'), !!$('.text', box())], ['▸ Summary of the earlier chat', 'false', false], 'Folded to one line at first');
+    ok(box().nextElementSibling.matches('.turn[data-node="root"]'), 'It sits above the first turn');
+    eq($('.body', pane('root')).scrollTop, 0, 'The view starts at it');
+    // A draft in the message box is left alone when it unfolds.
+    type($('.composer .msg', pane('root')), 'A draft');
+    await click(fold(), 'the folded summary');
+    await until(() => $('.text', box()), 'the summary to unfold');
+    await drawn();
+    same([txt(fold()), fold().getAttribute('aria-expanded'), $$('p', box()).length, $$('.math:not(.raw)', box()).length], ['▾ Summary of the earlier chat', 'true', 2, 1], 'Unfolded: its paragraphs, with the formula typeset');
+    has(txt($('.fine', box())), 'Claude is given it with every question here.', 'What it is for');
+    eq($('.composer .msg', pane('root')).value, 'A draft', 'The draft');
+    // It is text to read: a click on it asks nothing.
+    await click($('p', box()), 'a paragraph of the summary');
+    await sleep(200);
+    ok(!pop(), 'No ask menu on the summary');
+    // It stays unfolded while the conversation goes on, and Claude is given it.
+    const next = await sendIn('root', 'And for a median?');
+    await answered(next);
+    ok($('.text', box()), 'Still unfolded after a question');
+    has(lastCall().turns[1].content, 'Why the square root?\n\n(The app added this note.', 'The first turn sent');
+    has(lastCall().turns[1].content, ' What had been said before, in summary:\n' + context + ')', 'The summary travels in the first turn');
+    await click(fold(), 'the unfolded summary');
+    await until(() => !$('.text', box()), 'the summary to fold again');
+
+    // A conversation sent without one has no such line.
+    win.claude.deliver({ question: 'No summary here?', answer: 'None.' }, 'd2');
+    await until(() => conv().inbox === 'd2', 'the second document to open');
+    ok(!$('.summary', pane('root')), 'No summary line');
+  });
+
   test('Inbox', 'an answer that arrives while a question is being typed waits in the list', async () => {
     await given('main');
     const box = () => $('.composer .msg', pane('root'));

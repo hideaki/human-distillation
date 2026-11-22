@@ -200,6 +200,10 @@ and, if you ask for it, the earlier turns of the chat or a summary of them.
 The page opens it as a new conversation, at once if it is open and otherwise
 the next time it is. From there it is an ordinary conversation of the page.
 
+- **Earlier turns or a summary.** Earlier turns that were sent become turns
+  of the conversation, and each can be asked about. A summary is not a turn:
+  it sits folded in one line above the conversation, "Summary of the earlier
+  chat", and Claude is given it with every question asked there.
 - **Formulas.** The note asks Claude to write formulas in LaTeX, since only
   those can be clicked. A chat sometimes writes a symbol as a plain character.
 - **Not on the shared copy.** Only the owner of an artifact can write to its

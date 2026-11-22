@@ -1,12 +1,13 @@
 # Testing
 
-Five layers. The first four need nothing installed.
+Six layers. The first five need nothing installed.
 
 | Layer | What it checks | How to run it |
 | --- | --- | --- |
-| Parsing tests | How the text Claude writes is read: paragraphs, lists, code, diagrams, formulas, money, the `@@@` trailer | `npm test` |
+| Parsing tests | How the text Claude writes is read: paragraphs, lists, code, tables, diagrams, formulas, money, the `@@@` trailer | `npm test` |
 | Notion tests | How a Notion page is handed to Claude: a long one in parts, what one answer may read, what travels to the next question | `npm test` |
 | Web tests | How the web is searched and read for Claude, which addresses may be read, and what happens when a connector is not there | `npm test` |
+| Inbox tests | How an answer sent to the page from another chat is read, and when the page hears of one | `npm test` |
 | Static check | A name that hides an outer name, a name used before it is defined | `npm test` (needs an ESLint, see below) |
 | Flow tests | The real page, clicked through against the stand-in for Claude | open `/test` in the Browser pane |
 
@@ -22,8 +23,8 @@ npm test
 ```
 
 This is `node live/test/run.js`. It runs the parsing tests, the Notion tests,
-the web tests, then the static check, and prints a summary. It exits with an
-error if any fails.
+the web tests, the inbox tests, then the static check, and prints a summary.
+It exits with an error if any fails.
 
 ## Parsing tests
 
@@ -32,7 +33,7 @@ node --test live/test/parse.test.js
 ```
 
 `live/test/parse.test.js`, run by Node's own test runner. It covers the pure
-functions of `app.js` (`blocks`, `runs`, `pieces`, `clip`, `parseGraph`,
+functions of `app.js` (`blocks`, `cells`, `runs`, `pieces`, `clip`, `parseGraph`,
 `toMermaid`, `sentenceSpans`, `findTerm`) and `LLM.parse` in `llm.js`.
 
 `app.js` starts the page as it loads, so it cannot be loaded in Node.
@@ -67,6 +68,19 @@ Claude, that a long web page comes in parts, that `web_fetch` reads only an
 address the person, a search result or a page gave, what travels to the next
 question, and that a connector the viewer has not added is neither offered
 nor called.
+
+## Inbox tests
+
+```bash
+node --test live/test/inbox.test.js
+```
+
+`live/test/inbox.test.js` runs `llm.js` whole. It checks `LLM.fromInbox`:
+what a document sent from another chat becomes (the turns, the note that
+tells Claude where they came from, the title), and which documents are not a
+conversation. Against a stand-in store it checks that the page listens to the
+collection `inbox`, that a visitor to someone else's copy is not offered it,
+and that a page published without the store has none.
 
 ## Static check
 
@@ -118,6 +132,13 @@ Options, as query parameters:
 - `/test?only=formula` runs the tests whose name contains those words.
 - `/test?page=built` drives the single file that gets published. Run
   `python3 live/build.py` first.
+
+A test can put documents in the inbox before the page loads,
+`load({ inbox: { d1: { answer: '…' } } })`, or send one to the open page as a
+Claude chat would, `win.claude.deliver({ answer: '…' }, 'd1')`. The stand-in
+keeps them in the browser under a key of its own, which `load` clears. With
+`query: 'missing=db'` the page has no store, and with `query: 'visitor'` the
+viewer is not the owner of the copy.
 
 A test can load the page for a viewer who lacks a connector:
 `given('main', { query: 'missing=web' })`. The stand-in reads this from the
@@ -179,6 +200,7 @@ end of the grid section then runs every pair.
     live/test/parse.test.js   the parsing tests
     live/test/notion.test.js  the Notion tests
     live/test/web.test.js     the web tests
+    live/test/inbox.test.js   the inbox tests
     live/test/extract.js      gets the app's pure functions into Node
     live/test/eslintrc.json   the two rules of the static check
     live/test/run.js          the one command (npm test)

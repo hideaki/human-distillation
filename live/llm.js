@@ -59,8 +59,15 @@ const LLM = (() => {
   // `notion` and `web` say whether those lookups can be offered. `missing`
   // says which of them is not offered because the viewer has not added its
   // connector, which the message box then tells them.
-  const rt = { state: 'starting', sample: null, mcp: null, limits: null, standIn: false, notion: false, web: false, missing: { notion: false, web: false }, denied: false };
+  // `inbox` says whether answers can be sent to this page (see "the inbox").
+  const rt = { state: 'starting', sample: null, mcp: null, limits: null, standIn: false, notion: false, web: false, missing: { notion: false, web: false }, denied: false, inbox: false };
   let changed = () => {};
+  // One capability of the runtime, or null where this view has none.
+  const use = name => {
+    const c = window.claude;
+    if (!c || typeof c.use !== 'function') return Promise.resolve(null);
+    return Promise.resolve().then(() => c.use(name)).catch(() => null);
+  };
 
   // The viewer has no connector for this: stop offering it, and say so.
   function lacks(what) {
@@ -87,7 +94,6 @@ const LLM = (() => {
   const ready = (async () => {
     const c = window.claude;
     if (!c || typeof c.use !== 'function') { rt.state = 'none'; return rt; }
-    const use = name => Promise.resolve().then(() => c.use(name)).catch(() => null);
     const [sample, mcp] = await Promise.all([use('sample'), use('mcp')]);
     rt.sample = sample;
     rt.mcp = mcp;
@@ -112,6 +118,91 @@ const LLM = (() => {
     if (t !== 'quick' && t !== 'complex') return null;
     const ok = rt.limits && rt.limits.modelTiers;
     return !ok || ok.includes(t) ? t : null;
+  }
+
+  // ---------- the inbox ----------
+  // An answer written in another conversation with Claude can be sent to this
+  // page. The Claude of that conversation writes one document to the store
+  // the runtime keeps for this artifact (`claude.use("db")`), in the
+  // collection `inbox`, and the page opens it as a new conversation. The note
+  // at the top of page.html tells that Claude what to write.
+  //
+  // The page is published with a rule that lets only the artifact's owner
+  // read or write `inbox`. So this works on a person's own copy of the page:
+  // a visitor to someone else's copy finds the inbox empty, and their Claude
+  // is refused when it writes. A copy published without `db` has no inbox.
+
+  const INBOX = 'inbox';
+  // Not part of `ready`: the first question does not wait for the store.
+  const box = (async () => {
+    const [db, user] = await Promise.all([use('db'), use('user')]);
+    if (!db) return null;
+    // Whether the viewer owns this copy can be asked with nothing declared.
+    // Where it cannot be asked, the inbox is taken to be theirs.
+    const owner = user && typeof user.isOwner === 'function'
+      ? await Promise.resolve().then(() => user.isOwner()).catch(() => null) : null;
+    rt.inbox = owner !== false;
+    changed();
+    return db;
+  })();
+
+  // Call fn with the documents of the inbox, [{ id, data }], now and
+  // whenever one arrives. Never called where there is no store.
+  function inbox(fn) {
+    box.then(db => {
+      if (!db) return;
+      try {
+        db.collection(INBOX).onSnapshot(
+          snap => fn(snap.docs.filter(d => d.exists !== false).map(d => ({ id: d.id, data: d.data() }))),
+          () => {});
+      } catch (e) { /* a store that cannot be listened to: no inbox */ }
+    }, () => {});
+  }
+
+  // Take a document out of the store, when its conversation is deleted.
+  async function discard(id) {
+    const db = await box.catch(() => null);
+    if (!db) return;
+    try { await db.collection(INBOX).doc(id).delete(); } catch (e) { /* it stays in the store, and is not opened again */ }
+  }
+
+  const NO_QUESTION = 'Sent without its question';
+  const words = v => (typeof v === 'string' ? v.replace(/\r/g, '').trim() : '');
+
+  // A document of the inbox as the turns of a conversation, or null when it
+  // has no answer in it. Its fields:
+  //   answer    the answer to study, word for word (`text` is read as well)
+  //   question  what it answered
+  //   earlier   the turns before it, oldest first: [{ question, answer }]
+  //   context   or, for a long conversation, a summary of what came before
+  //   title     a title for the conversation
+  //   from      where it was sent from
+  // -> { title, from, turns: [{ q, noq, prompt, raw }] }
+  // `prompt` is what Claude is given as the person's turn. The first one says
+  // that the answers were written elsewhere: they have no @@@ section and
+  // may have headings and tables, and Claude would otherwise carry on so.
+  function fromInbox(data) {
+    if (!data || typeof data !== 'object') return null;
+    const answer = words(data.answer) || words(data.text);
+    if (!answer) return null;
+    const pairs = (Array.isArray(data.earlier) ? data.earlier : [])
+      .map(t => (t && typeof t === 'object' ? { q: words(t.question), raw: words(t.answer) } : null))
+      .filter(t => t && t.raw);
+    pairs.push({ q: words(data.question), raw: answer });
+    const k = pairs.length;
+    const context = words(data.context);
+    const note = `(The app added this note. This conversation began in another chat with you and was sent to this app: ${k === 1 ? 'the answer that follows was' : `the ${k} answers that follow were`} written there. Answer what is asked after ${k === 1 ? 'it' : 'them'} by the instructions above, with the ${SEP} section.`
+      + (context ? ` What had been said before, in summary:\n${clip(context, 20000)}` : '') + ')';
+    const turns = pairs.map((t, i) => ({
+      q: t.q || NO_QUESTION,
+      noq: !t.q,
+      prompt: (t.q || '(The question this answered was not sent along.)') + (i ? '' : '\n\n' + note),
+      raw: t.raw,
+    }));
+    // Without a title or a question, the answer's first line names it.
+    const opening = answer.split('\n').find(l => l.trim()).replace(/^[\s#>*-]+|[*_`]+/g, '').trim();
+    const title = clip((words(data.title) || pairs[0].q || pairs[k - 1].q || opening || 'An answer sent from Claude').replace(/\s+/g, ' '), 90);
+    return { title, from: clip(words(data.from), 40), turns };
   }
 
   // ---------- what Claude is told ----------
@@ -774,6 +865,7 @@ const LLM = (() => {
     SEP, VERBS, WEB, rt, ready,
     onChange(fn) { changed = fn; },
     ask, side, parse, partSpan,
+    inbox, discard, fromInbox,
     passagePrompt, askPrompt, partPrompt, formulaPrompt, symbolPrompt, termPrompt, followPrompt, backPrompt, DRAW, WORDED,
     errorText, isFinal: code => FINAL.has(code),
   };

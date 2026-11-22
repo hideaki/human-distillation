@@ -84,6 +84,10 @@ an answer loses you, which happens a lot with hard material.
   reads web pages through the Parallel Search connector, for what is recent
   or what it is not sure of, and links the page each point comes from. Every
   question also tells Claude today's date, so that "the latest" means now.
+- **Answers from another chat.** On your own copy, ask Claude in any chat to
+  send an answer, or the conversation that led to it, to Human Distillation.
+  It opens in the page as a new conversation, and every part of it can be
+  asked about. See [Send an answer from another chat](#send-an-answer-from-another-chat).
 - **A map.** The sidebar shows the tree, with what is open, queued and
   resolved, and a button to the next open question.
 - **Write it up.** Turns the whole tree into one document.
@@ -107,6 +111,9 @@ page uses the runtime Claude gives a page it hosts:
 - `claude.use("mcp")` calls two of the viewer's connectors: Notion
   (`notion-search` and `notion-fetch`, both read-only) and, for the web,
   Parallel Search (`web_search` and `web_fetch`).
+- `claude.use("db")` is a small store that Claude keeps for the artifact. The
+  page uses one collection of it, `inbox`, where a Claude chat of the
+  artifact's owner can leave an answer for the page to open.
 
 So whoever opens the page uses their own Claude, their own Notion and their
 own web search, and the app has no sign-in of its own.
@@ -131,9 +138,10 @@ in Claude's settings under Connectors. Each is optional.
 2. In Claude Code, opened in this folder, ask for it to be published:
 
    > Publish `live/dist/human-distillation.html` as an artifact, with the
-   > capabilities `sample`, and `mcp` for the Notion connector's
+   > capabilities `sample`, `mcp` for the Notion connector's
    > `notion-search` and `notion-fetch` and the Parallel Search connector's
-   > `web_search` and `web_fetch`.
+   > `web_search` and `web_fetch`, and `db` with a rule that only the owner
+   > may read or write `inbox`.
 
    Those capabilities, as Claude declares them:
 
@@ -145,13 +153,19 @@ in Claude's settings under Connectors. Each is optional.
          { "server": "Notion", "tools": ["notion-search", "notion-fetch"] },
          { "server": "Parallel Search", "tools": ["web_search", "web_fetch"] }
        ]
+     },
+     "db": {
+       "rules": [{ "path": "inbox", "read": "owner", "write": "owner" }]
      }
    }
    ```
 
    Leave a connector out to publish without it, or leave `mcp` out to publish
    with neither. The page then does not offer that box under the message box,
-   and everything else works.
+   and everything else works. Leave `db` out and the page cannot be sent an
+   answer from another chat; everything else works. Keep the rule if you
+   keep `db`: without it, anyone you share the page with could read what was
+   sent to it.
 
 3. Claude answers with a link of the form `https://claude.ai/artifact/…`.
    Open it in Claude.
@@ -172,12 +186,37 @@ bar under its header, and a reload asks once more.
 A connector you have not added to Claude shows under the message box as "not
 connected" in place of its tick box. A click on it says how to add it.
 
+### Send an answer from another chat
+
+This needs a copy of your own, published with `db` as above. In any Claude
+chat, after an answer you want to study, say for example:
+
+> Send that answer to my Human Distillation artifact.
+
+Give Claude the artifact's link if it does not find the page by name. Claude
+reads the note at the top of the page, which says what to write, and writes
+one document to the page's inbox: the answer word for word, the question,
+and, if you ask for it, the earlier turns of the chat or a summary of them.
+The page opens it as a new conversation, at once if it is open and otherwise
+the next time it is. From there it is an ordinary conversation of the page.
+
+- **Formulas.** The note asks Claude to write formulas in LaTeX, since only
+  those can be clicked. A chat sometimes writes a symbol as a plain character.
+- **Not on the shared copy.** Only the owner of an artifact can write to its
+  store, so nobody can send an answer to a copy they were only given a link
+  to. This is why you need your own.
+- **Where the document stays.** In the artifact's store on Claude's side,
+  readable by you alone, until you delete the conversation in the page. Your
+  other browsers open it from there too.
+
 ### Good to know
 
 - **Where conversations live.** In the browser's `localStorage`, for that
   artifact, and nowhere else. They survive an update of the artifact. They do
   not follow you to another browser or device. "Write it up", then "Copy as
-  Markdown", takes a conversation out.
+  Markdown", takes a conversation out. The one exception is the start of a
+  conversation that was sent from another chat, which stays in the
+  artifact's store as described above.
 - **What Claude sees.** Each question is sent with the turns on the path that
   leads to it, and with nothing from other branches or other conversations.
 - **Sharing.** Someone you share the artifact with asks on their own Claude
@@ -211,7 +250,7 @@ The repository also has
 with placeholder text and is for work on the interface, not for use.
 
 To put another model behind the page, replace the runtime:
-`live/dev-runtime.js` implements the same two calls with placeholders, and
+`live/dev-runtime.js` implements the same calls with placeholders, and
 is the place to start.
 
 ## Architecture
@@ -237,14 +276,19 @@ flowchart LR
     rt["Claude's page runtime<br/>window.claude"]
     llm -- "use('sample')" --> rt
     llm -- "use('mcp')" --> rt
+    llm -- "use('db')" --> rt
   end
   claude["Claude<br/>on the viewer's account"]
   notion["Notion<br/>through the viewer's connector"]
   web["The web<br/>through the viewer's<br/>Parallel Search connector"]
+  inbox[("The artifact's store<br/>the collection inbox")]
+  chat["A Claude chat<br/>of the artifact's owner"]
   cdn["CDNs<br/>MathJax, dagre, fonts"]
   rt <--> claude
   rt <--> notion
   rt <--> web
+  rt <--> inbox
+  chat -- "writes an answer" --> inbox
   cdn -.-> app
 ```
 
@@ -263,7 +307,8 @@ and the web, and the reading of what comes back. `app.js` never calls the runtim
 `use("sample")` gives a function that sends turns to Claude and streams the
 answer back. `use("mcp")` gives a function that calls a tool of one of the
 viewer's connectors. Both act as the viewer, and Claude asks the viewer
-before the first call of each.
+before the first call of each. `use("db")` gives the artifact's store, which
+is the one way in: an answer sent from another chat arrives there.
 
 ### `window.claude` and `use("sample")`
 
@@ -347,6 +392,18 @@ other as "not connected". The two capabilities meet inside a tool: Claude
 calls the page's `notion_fetch`, and its `execute` calls the connector's
 `notion-fetch`.
 
+`use("db")` gives a store of JSON documents that Claude keeps for the
+artifact, outside the page. Unlike `localStorage`, a Claude session of the
+artifact's owner can write to it from outside, and that is all the page uses
+it for. A chat's Claude writes one document to the collection `inbox`
+(the comment at the top of `page.html` tells it the fields). `llm.js` listens
+to that collection, `LLM.fromInbox` turns a document into turns, and
+`app.js` makes a conversation of them whose answers are already there
+(`given` on a turn). The artifact is published with a rule that lets only its
+owner read or write `inbox`. The store's own rules already refuse a write
+from anyone outside the owner's organization, so a visitor to a shared copy
+can neither send to it nor see what was sent.
+
 This describes the runtime as it was in November 2026. It is Claude's, not
 this project's, and it may change.
 
@@ -365,9 +422,10 @@ flowchart LR
       app <--> llm
       app <--> store
     end
-    stand["dev-runtime.js<br/>a stand-in for window.claude:<br/>placeholder answers,<br/>made-up Notion and web pages"]
+    stand["dev-runtime.js<br/>a stand-in for window.claude:<br/>placeholder answers,<br/>made-up Notion and web pages,<br/>a store kept in the browser"]
     llm -- "use('sample')" --> stand
     llm -- "use('mcp')" --> stand
+    llm -- "use('db')" --> stand
   end
   cdn["CDNs<br/>MathJax, dagre, fonts"]
   dev --> tab
@@ -377,10 +435,12 @@ flowchart LR
 `dev.py` serves `page.html` and its files as they are, inside the same small
 document skeleton Claude puts around a published page, and adds one script:
 `dev-runtime.js`. That script puts a stand-in where the runtime would be,
-with the same two calls. `use("sample")` writes a placeholder answer in the
+with the same calls. `use("sample")` writes a placeholder answer in the
 format Claude is asked for, and `use("mcp")` plays the Notion and Parallel
-Search connectors with made-up pages and search results. Nothing leaves the
-machine but the requests to the CDNs.
+Search connectors with made-up pages and search results. `use("db")` is a
+store kept in the browser: `?send=sample` in the address has a sample answer
+arrive in its inbox, and `claude.deliver({...})` in the console sends any
+other. Nothing leaves the machine but the requests to the CDNs.
 
 `app.js` and `llm.js` are the same files in both pictures and cannot tell
 which one they are in. So what is seen working locally is the page that gets

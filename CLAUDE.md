@@ -18,7 +18,8 @@ in step when a feature is added or the way to publish changes.
       page.html           the page, in the form Claude publishes (no <html>/<body>)
       styles.css
       llm.js              all that talks to Claude: the instructions, the prompts,
-                          the calls, and LLM.parse for what comes back
+                          the calls, LLM.parse for what comes back, and the
+                          inbox (answers sent in from another chat)
       app.js              the rest, in one closure
       dev-runtime.js      a stand-in for Claude, for local work only
       dev.py              the local preview server
@@ -49,9 +50,12 @@ in step when a feature is added or the way to publish changes.
   `#math`, `#slow`, `#long`, `#error`, `#refuse`, `#deny`, "notion" and `#web`
   (with `#parts` or `#skim` for a long page, read whole or only its start).
   `?missing=web` or `?missing=notion` in the page's address plays a viewer
-  who has not added that connector.
-- Tests: `npm test` runs the parsing tests, the Notion tests, the web tests
-  and the static check. The flow
+  who has not added that connector. For the inbox: `?send=sample` has a
+  sample answer arrive, `claude.deliver({...})` in the console sends any
+  other, `?missing=db` is a copy published without the store, and `?visitor`
+  a viewer who is not the owner.
+- Tests: `npm test` runs the parsing tests, the Notion tests, the web tests,
+  the inbox tests and the static check. The flow
   tests run in the Browser pane at `/test`. `live/TESTING.md` explains all
   three, including the grid (every per-thread action in every kind of thread).
 - Publish: the app lives as two Claude artifacts in the author's Claude
@@ -66,7 +70,12 @@ in step when a feature is added or the way to publish changes.
   is created. Leave `capabilities` out so the stored ones are kept (`sample`,
   and `mcp` for Notion's `notion-search` and `notion-fetch` and for Parallel
   Search's `web_search` and `web_fetch`). To add a connector, state the whole
-  set: a stated set replaces the stored one.
+  set: a stated set replaces the stored one. The inbox needs `db` with the
+  rule `{path: "inbox", read: "owner", write: "owner"}`, as the README's
+  publish step gives it. An artifact published before the inbox has no `db`
+  stored, so its first publish with the inbox states the whole set. Never
+  declare `db` without that rule: the default lets everyone the page is
+  shared with read what was sent to it.
 - Nothing is published without a full pass of the tests.
 
 ## How the app talks to Claude
@@ -119,6 +128,23 @@ uses the user's existing connections with no sign-in of its own.
   page already read has named (`mayRead`). An address Claude put together
   could carry what it read in the person's Notion out to another site. Keep
   this check when changing the tools.
+- The inbox: `claude.use("db")` is a store Claude keeps for the artifact,
+  which a Claude session of the owner can write to from outside (the
+  `ArtifactData` tool here, the same from an ordinary chat). A chat's Claude
+  writes one document to the collection `inbox`; the comment at the top of
+  `page.html` is its instructions, found when it reads the artifact.
+  `LLM.inbox` listens, `LLM.fromInbox` turns a document into turns, and
+  `takeDocs` in `app.js` makes the conversation. Its turns have `given: true`
+  and were never asked of Claude here; the first one's `prompt` ends with a
+  note that says so and asks for the `@@@` section from then on, since the
+  sent answers have none. `store.taken` keeps a document from being opened
+  twice in one browser. The document stays in the store until its
+  conversation is deleted.
+- Only the artifact's owner can use the inbox: the rule says so, and the
+  store refuses a write from an outside visitor whatever the rule. So it
+  works on a person's own copy and never on a copy they were given a link
+  to. `rt.inbox` is false for a viewer who is not the owner (`isOwner()`
+  needs no declared capability).
 - A connector the viewer has not added: `connectors()` asks the runtime for
   the list at load (listing never prompts) and `rt.missing` records what is
   absent. That lookup is then not lent to Claude, and the message box shows
@@ -157,6 +183,10 @@ uses the user's existing connections with no sign-in of its own.
   (`mmlTex`).
 - Definitions: an answer shows its own terms and those defined by other
   answers of the same conversation (`termsFor`).
+- Text: `blocks` reads paragraphs, lists, code, formulas, diagrams, and also
+  tables and rules. Claude is told to write no headings and no tables here;
+  those two exist for answers that were sent in. A heading becomes a bold
+  paragraph.
 
 ## Things that have bitten
 

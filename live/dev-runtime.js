@@ -20,6 +20,13 @@
 //   ?missing=web      the viewer has not added the web connector (or: notion, or both
 //                     with a comma). It is not listed, and a call to it is refused.
 //   ?gone=web         it is listed, but a call to it is refused as not connected
+//
+// For the inbox (an answer sent to the page from another conversation):
+//   claude.deliver(data, id)   in the console: plays that conversation's Claude
+//                     writing a document to the inbox
+//   ?send=sample      a sample document arrives a moment after the page loads
+//   ?missing=db       the page was published without the store: no inbox
+//   ?visitor          the viewer is not the owner of this copy: the inbox reads empty
 
 (() => {
   'use strict';
@@ -290,8 +297,95 @@
     },
   };
 
+  // The store Claude keeps for an artifact (claude.use("db")), with only what
+  // the page uses of it: the collection "inbox", listened to, and a document
+  // deleted. What it holds is kept in this browser, as the real store keeps
+  // it between visits.
+  const BOX = 'human-distillation-dev-inbox';
+  const visitor = asked.has('visitor');
+  const held = () => { try { return JSON.parse(localStorage.getItem(BOX)) || {}; } catch (e) { return {}; } };
+  const listeners = new Set();
+  const meta = { fromCache: false, hasPendingWrites: false };
+  const snapshot = () => {
+    const all = visitor ? {} : held();
+    const docs = Object.keys(all).sort().map(id => ({ id, exists: true, data: () => all[id], metadata: meta }));
+    return { docs, size: docs.length, empty: !docs.length, docChanges: () => [], metadata: meta };
+  };
+  const hold = all => {
+    localStorage.setItem(BOX, JSON.stringify(all));
+    listeners.forEach(fn => fn(snapshot()));
+  };
+  const db = {
+    collection(path) {
+      if (path !== 'inbox') throw new TypeError('The stand-in store has only the collection "inbox".');
+      return {
+        path,
+        onSnapshot(next) {
+          listeners.add(next);
+          setTimeout(() => { if (listeners.has(next)) next(snapshot()); }, 250);
+          return () => listeners.delete(next);
+        },
+        doc: id => ({
+          id,
+          path: path + '/' + id,
+          async delete() {
+            if (visitor) throw { code: 'invalid_argument', message: 'Not yours to write.' };
+            const all = held();
+            delete all[id];
+            hold(all);
+          },
+        }),
+      };
+    },
+  };
+  // What Claude does in the other conversation: write one document.
+  function deliver(data, id) {
+    const all = held();
+    const key = id || 'doc-' + Date.now().toString(36);
+    all[key] = data;
+    hold(all);
+    return key;
+  }
+  const SAMPLE = {
+    from: 'chat',
+    title: 'Why the standard error shrinks',
+    earlier: [{
+      question: 'What is a standard error?',
+      answer: 'The **standard error** of a statistic is the standard deviation of that statistic across repeated samples. For the sample mean it says how far a mean of $n$ draws typically lands from the true mean.',
+    }],
+    question: 'Why does it shrink with the square root of n?',
+    answer: [
+      '## The short answer',
+      '',
+      'Variances add, standard deviations do not. The variance of a sum of $n$ independent draws is $n\\sigma^2$, and dividing by $n$ scales a variance by $1/n^2$:',
+      '',
+      '$$\\mathrm{SE}(\\bar{X}) = \\sqrt{\\frac{n\\sigma^2}{n^2}} = \\frac{\\sigma}{\\sqrt{n}}$$',
+      '',
+      '---',
+      '',
+      '## In numbers',
+      '',
+      '| Draws $n$ | Standard error | Compared with one draw |',
+      '|---:|:---:|---|',
+      '| 1 | $\\sigma$ | the same |',
+      '| 4 | $\\sigma / 2$ | half |',
+      '| 100 | $\\sigma / 10$ | a tenth, written `sigma | 10` in code |',
+      '',
+      'Halving the error takes four times the data. This relies on the draws being independent.',
+    ].join('\n'),
+  };
+  if (asked.get('send') === 'sample') setTimeout(() => deliver(SAMPLE, 'sample'), 1500);
+
+  const caps = {
+    sample,
+    mcp,
+    db: without('missing').includes('db') ? null : db,
+    // Who is looking: the page asks only whether it is the owner.
+    user: { isOwner: async () => !visitor },
+  };
   window.claude = {
     standIn: true,
-    use: async name => (name === 'sample' ? sample : name === 'mcp' ? mcp : null),
+    use: async name => caps[name] || null,
+    deliver,
   };
 })();

@@ -14,6 +14,8 @@
   'use strict';
 
   const KEY = 'human-distillation-live-v1';
+  // Where the stand-in keeps what its store holds (dev-runtime.js).
+  const BOX = 'human-distillation-dev-inbox';
   const params = new URLSearchParams(location.search);
   const TARGET = params.get('page') === 'built' ? '/built-under-test' : '/under-test';
   const ONLY = (params.get('only') || '').toLowerCase();
@@ -90,13 +92,16 @@
   // Load the page. o.seed: what storage holds (default: nothing, which shows
   // the worked example). o.keep: leave storage as it is, as a reload does.
   // o.raw: how many formulas are expected to stay as source.
+  // o.inbox: the documents the store's inbox holds, { id: data } (default: none).
   async function load(o = {}) {
     keepErrors();
     // Leave the old page first, so nothing in it can write to storage again.
     await navigate('about:blank');
     if (!o.keep) {
       localStorage.removeItem(KEY);
+      localStorage.removeItem(BOX);
       if (o.seed) localStorage.setItem(KEY, o.seed);
+      if (o.inbox) localStorage.setItem(BOX, JSON.stringify(o.inbox));
     }
     frame.style.width = (o.width || 1440) + 'px';
     frame.style.height = (o.height || 900) + 'px';
@@ -1444,6 +1449,146 @@
     const second = await sendIn(first, 'And again #web');
     n = await answered(second);
     ok(!n.web && !lastCall().tools, 'The next question is asked without them');
+  });
+
+  // ----- the inbox -----
+  // An answer written in another conversation with Claude and sent to the
+  // page. `win.claude.deliver` plays that conversation's Claude writing the
+  // document to the store.
+
+  const SENT_DOC = {
+    from: 'chat',
+    title: 'Why the standard error shrinks',
+    earlier: [{ question: 'What is a standard error?', answer: 'The **standard error** of a statistic is its standard deviation across repeated samples.' }],
+    question: 'Why does it shrink with the square root of n?',
+    answer: [
+      '## The short answer', '',
+      'Variances add, standard deviations do not. Dividing by $n$ scales a variance by $1/n^2$:', '',
+      '$$\\mathrm{SE}(\\bar{X}) = \\frac{\\sigma}{\\sqrt{n}}$$', '',
+      '---', '',
+      '| Draws $n$ | Standard error | Compared with one draw |',
+      '|---:|:---:|---|',
+      '| 1 | $\\sigma$ | the same |',
+      '| 4 | $\\sigma / 2$ | half |', '',
+      'Halving the error takes four times the data. This relies on the draws being independent.',
+    ].join('\n'),
+  };
+  const held = () => JSON.parse(localStorage.getItem(BOX) || '{}');
+  const sentConvs = () => Object.values(store().convs).filter(c => c.inbox);
+  const convRow = title => $$('#convs .conv').find(r => txt(r).includes(title));
+  // Long enough for the page to have heard what the inbox holds.
+  const heard = () => sleep(900);
+
+  test('Inbox', 'an answer sent while the page is open opens as a new conversation, drawn in full, and any part of it can be asked about', async () => {
+    await load();
+    await until(() => !$('#help-inbox').hidden, 'the page to say how an answer is sent to it');
+    eq(sentConvs().length, 0, 'Conversations that were sent, before anything is');
+    win.claude.deliver(SENT_DOC, 'd1');
+    await until(() => conv().inbox === 'd1' && $('.turn[data-node="n1"]'), 'the document to open as a conversation');
+    await drawn();
+    has(toastText(), 'An answer sent from Claude has opened as a new conversation.', 'The toast');
+    same([conv().title, cols()], ['Why the standard error shrinks', [{ start: 'root', leaf: 'n1' }]], 'The conversation');
+    same(Object.values(conv().nodes).map(m => [m.id, m.parent, m.q, m.given, m.phase]), [
+      ['root', null, 'What is a standard error?', true, 'done'],
+      ['n1', 'root', 'Why does it shrink with the square root of n?', true, 'done'],
+    ], 'Its turns');
+    eq(calls().length, 0, 'Requests to Claude: the answers came with it');
+    has(txt(convRow('Why the standard error')), 'Sent', 'Its row in the list is marked');
+
+    // Drawn as an answer: the heading, the formulas, the rule and the table.
+    const t = () => answerText('n1');
+    eq(txt($('strong', t())), 'The short answer', 'The heading');
+    ok($('.math.display', t()) && !$('.math.raw', t()), 'The formulas are typeset');
+    eq($$('hr', t()).length, 1, 'The rule');
+    same($$('th', t()).map(e => `${e.className}|${txt(e)}`), ['right|Draws $n$', 'center|Standard error', '|Compared with one draw'], 'The head of the table');
+    same($$('tbody tr', t()).map(r => $$('td', r).map(txt)), [['1', '$\\sigma$', 'the same'], ['4', '$\\sigma / 2$', 'half']], 'The rows of the table');
+    eq($$('.fine.origin', pane('root')).map(txt).join('|'), 'The conversation up to here was written in another chat with Claude and sent here.', 'Where the sent turns end');
+    noSideways('A sent answer');
+
+    // A typed question carries on from it, and is answered by Claude.
+    const next = await sendIn('root', 'And with correlated draws?');
+    const n = await answered(next);
+    await drawn();
+    same([n.parent, !!n.given, n.phase], ['n1', false, 'done'], 'The new turn');
+    const sent = lastCall().turns;
+    same(sent.map(x => x.role), ['user', 'user', 'assistant', 'user', 'assistant', 'user'], 'The turns sent');
+    has(sent[1].content, 'What is a standard error?\n\n(The app added this note. This conversation began in another chat with you and was sent to this app: the 2 answers that follow were written there.', 'The first turn says where the answers came from');
+    same([sent[2].content, sent[3].content, sent[4].content, sent[5].content], [SENT_DOC.earlier[0].answer, SENT_DOC.question, SENT_DOC.answer, 'And with correlated draws?'], 'The sent answers travel as Claude\'s own');
+    eq($$('.fine.origin', pane('root')).length, 1, 'The note stays under the last sent answer');
+
+    // A sentence of the sent answer, and a cell of its table.
+    await click(sentence(t(), 'Halving the error'), 'a sentence of the sent answer');
+    const side = await explain();
+    same([node(side).parent, node(side).anchor.text], ['n1', 'Halving the error takes four times the data.'], 'The thread on the sentence');
+    eq(lastCall().turns.length, 6, 'The turns sent with it: the path to that answer, and no more');
+    ok($(`mark[data-node="${side}"]`, t()), 'The sentence is marked');
+    await click($('header .icon', pane(side)), 'the × of the thread');
+    await until(() => !pane(side), 'the thread to close');
+    await click(sentence(t(), 'half'), 'a cell of the table');
+    const cell = await explain();
+    same([node(cell).parent, node(cell).anchor.text], ['n1', 'half'], 'The thread on the cell');
+    ok($(`td mark[data-node="${cell}"]`, t()), 'The cell is marked');
+  });
+
+  test('Inbox', 'a document waiting in the inbox opens at load, once; deleting the conversation takes it out of the inbox', async () => {
+    await load({ inbox: { d1: { title: 'Sent alone', answer: 'An answer that came alone.\n\nIts second paragraph.' } } });
+    await until(() => conv().inbox === 'd1' && $('.turn[data-node="root"]'), 'the document to open as a conversation');
+    eq(txt($('.turn[data-node="root"] .user.none .bubble')), 'Sent without its question', 'In place of the question');
+    eq(txt($('.fine.origin', pane('root'))), 'This answer was written in another chat with Claude and sent here.', 'Under the answer');
+    eq(txt($('#tree .row .lab')), 'Sent alone', 'The map names it by its title');
+    eq(chipLabels('root').join('|'), 'Show this as a diagram', 'The chips');
+    // The write-up is named by the title too.
+    const grab = clipboard();
+    await click($('#writeup'), '"Write it up"');
+    const sheet = await until(() => $('#modal.show .sheet'), 'the write-up');
+    eq(txt($('h1', sheet)), 'Sent alone', 'The title of the write-up');
+    await click(button(sheet, 'Copy as Markdown'), '"Copy as Markdown"');
+    ok((await until(() => grab.text, 'the Markdown')).startsWith('# Sent alone\n\nAn answer that came alone.'), 'The Markdown');
+    await click(button(sheet, 'Close'), '"Close"');
+
+    // The document stays in the store, and is not opened a second time.
+    ok(held().d1, 'The document is still in the inbox');
+    await reload();
+    await heard();
+    eq(sentConvs().length, 1, 'Conversations made from it after a reload');
+    // A second document arrives: the first is left alone.
+    win.claude.deliver({ question: 'A second one?', answer: 'Yes.' }, 'd2');
+    await until(() => conv().inbox === 'd2', 'the second document to open');
+    eq(sentConvs().length, 2, 'Conversations that were sent');
+
+    await click($('.del', convRow('Sent alone')), 'the delete button');
+    await click(button(convRow('Delete this conversation?'), 'Delete'), '"Delete"');
+    await until(() => !held().d1, 'the document to leave the inbox');
+    same(Object.keys(held()), ['d2'], 'What the inbox holds');
+    await reload();
+    await heard();
+    same(sentConvs().map(c => c.inbox), ['d2'], 'After a reload it has not come back');
+  });
+
+  test('Inbox', 'an answer that arrives while a question is being typed waits in the list', async () => {
+    await given('main');
+    const box = () => $('.composer .msg', pane('root'));
+    type(box(), 'Half a question');
+    win.claude.deliver({ question: 'Does it wait?', answer: 'It does.' }, 'd3');
+    await until(() => toastText().includes('An answer sent from Claude is in the list of conversations.'), 'the toast');
+    same([conv().title, box().value], [FIRST, 'Half a question'], 'The reader is left where they were');
+    has(txt(convRow('Does it wait?')), 'Sent', 'It is in the list');
+    type(box(), '');
+    await click($('.open', convRow('Does it wait?')), 'its row in the list');
+    await until(() => conv().inbox === 'd3' && txt(answerText('root')) === 'It does.', 'it to open');
+  });
+
+  test('Inbox', 'no inbox where the page has no store, none for a visitor, and a document with no answer is left alone', async () => {
+    const waiting = { d1: { question: 'Is anyone there?', answer: 'Yes.' } };
+    await load({ query: 'missing=db', inbox: waiting });
+    await heard();
+    ok($('#help-inbox').hidden && !sentConvs().length, 'Published without the store: nothing is opened, and nothing is said about sending');
+    await load({ query: 'visitor', inbox: waiting });
+    await heard();
+    ok($('#help-inbox').hidden && !sentConvs().length, 'A visitor to someone else\'s copy: the same');
+    await load({ inbox: { bad: { note: 'no answer in this one' }, d1: waiting.d1 } });
+    await until(() => conv().inbox === 'd1', 'the good document to open');
+    same([sentConvs().length, Object.keys(store().taken).sort(), Object.keys(held()).sort()], [1, ['bad', 'd1'], ['bad', 'd1']], 'The other is passed over, and stays where it is');
   });
 
   test('Conversations', 'new, switch and delete', async () => {

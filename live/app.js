@@ -137,8 +137,12 @@
 
   const shown = () => new Set(state.cols.flatMap(colPath));
 
+  // What the conversation is about, in a line: its first question, or its
+  // title when its first answer was sent here without one.
+  const topic = () => (N('root').noq ? state.title : N('root').q).replace(/\s+/g, ' ');
+
   function label(n) {
-    if (!n.parent) return clip(n.q, 90);
+    if (!n.parent) return clip(topic(), 90);
     if (n.anchor) return n.anchor.sym ? '$' + n.anchor.sym + '$' : n.anchor.math || formulaOnly(n.anchor.text) ? clip(n.anchor.text, 46) : quote(n.anchor.text);
     return n.back ? 'Explained back: ' + clip(n.q, 38) : clip(n.q, 52);
   }
@@ -151,6 +155,8 @@
     let s = null;
     try { s = JSON.parse(localStorage.getItem(KEY)); } catch (e) { s = null; }
     if (!s || s.v !== 1 || !s.convs || typeof s.convs !== 'object') s = { v: 1, current: null, convs: {}, prefs: {} };
+    // The documents of the inbox this browser has opened already, by id.
+    if (!s.taken || typeof s.taken !== 'object') s.taken = {};
     s.prefs = { level: 1, tier: 'default', notion: false, web: false, known: {}, ...(s.prefs || {}) };
     if (!s.prefs.known || typeof s.prefs.known !== 'object') s.prefs.known = {};
     Object.values(s.convs).forEach(c => {
@@ -261,6 +267,29 @@
   // ---------- text: what Claude wrote, as page elements ----------
   // Deliberately small: paragraphs, lists, code, and a little inline markup.
   // Each sentence becomes its own element so that it can be pointed at.
+  // Claude is asked for no tables here, but an answer sent in from another
+  // conversation (the inbox) often has one, and a rule between its sections.
+
+  // The cells of one row of a table. A bar inside code or a formula, or one
+  // written \|, does not end a cell.
+  function cells(line) {
+    let s = line.trim();
+    if (s.startsWith('|')) s = s.slice(1);
+    if (/(?<!\\)\|$/.test(s)) s = s.slice(0, -1);
+    const out = [''];
+    const plain = t => t.split(/(?<!\\)\|/).forEach((bit, k) => {
+      if (k) out.push('');
+      out[out.length - 1] += bit.replace(/\\\|/g, '|');
+    });
+    let last = 0;
+    for (const m of s.matchAll(ATOM_RE)) {
+      plain(s.slice(last, m.index));
+      out[out.length - 1] += m[0];
+      last = m.index + m[0].length;
+    }
+    plain(s.slice(last));
+    return out.map(c => c.trim());
+  }
 
   function blocks(text) {
     const out = [];
@@ -268,6 +297,12 @@
     const item = l => /^\s*(?:[-*•]|\d+[.)])\s+(.*)$/.exec(l);
     const fence = l => /^\s*(```|~~~)/.exec(l);
     const mopen = l => /^\s*(\$\$|\\\[)/.exec(l);
+    // A line of three or more dashes, stars or underscores.
+    const rule = l => /^\s*([-*_])(?:\s*\1){2,}\s*$/.test(l);
+    // A table starts where a line with a bar in it is followed by the line
+    // of dashes that sets its columns.
+    const dashes = l => l.includes('|') && /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/.test(l);
+    const tableAt = k => k + 1 < lines.length && lines[k].includes('|') && dashes(lines[k + 1]);
     let i = 0;
     while (i < lines.length) {
       const l = lines[i];
@@ -308,6 +343,16 @@
         out.push({ type: lang === 'graph' ? 'graph' : 'code', text: body.join('\n'), closed });
         continue;
       }
+      if (rule(l)) { out.push({ type: 'hr' }); i++; continue; }
+      if (tableAt(i)) {
+        const head = cells(l);
+        const sides = cells(lines[i + 1]).map(c => (/^:-+:$/.test(c) ? 'center' : /-:$/.test(c) ? 'right' : ''));
+        const rows = [];
+        i += 2;
+        while (i < lines.length && lines[i].trim() && lines[i].includes('|') && !fence(lines[i])) rows.push(cells(lines[i++]));
+        out.push({ type: 'table', head, align: sides, rows });
+        continue;
+      }
       if (item(l)) {
         const ordered = /^\s*\d/.test(l), items = [];
         while (i < lines.length) {
@@ -320,7 +365,7 @@
         continue;
       }
       const buf = [lines[i++].trim()];
-      while (i < lines.length && lines[i].trim() && !fence(lines[i]) && !item(lines[i]) && !mopen(lines[i])) buf.push(lines[i++].trim());
+      while (i < lines.length && lines[i].trim() && !fence(lines[i]) && !item(lines[i]) && !mopen(lines[i]) && !rule(lines[i]) && !tableAt(i)) buf.push(lines[i++].trim());
       const p = buf.join(' ');
       const h = /^#{1,6}\s+(.*)$/.exec(p);
       out.push({ type: 'p', text: h ? '**' + h[1].replace(/\*\*/g, '') + '**' : p.replace(/^>\s?/, '') });
@@ -447,6 +492,18 @@
         const p = el('p');
         fillInline(p, b.text, clickable);
         host.append(p);
+      } else if (b.type === 'hr') {
+        host.append(el('hr'));
+      } else if (b.type === 'table') {
+        const cell = (tag, src, k) => {
+          const c = el(tag, { class: b.align[k] || null });
+          fillInline(c, src || '', clickable);
+          return c;
+        };
+        // In a frame of its own, so that a wide table scrolls and the page does not.
+        host.append(el('div.tablewrap', {}, el('table', {},
+          el('thead', {}, el('tr', {}, b.head.map((h, k) => cell('th', h, k)))),
+          el('tbody', {}, b.rows.map(r => el('tr', {}, b.head.map((h, k) => cell('td', r[k], k))))))));
       } else {
         host.append(el(b.type, {}, b.items.map(it => {
           const li = el('li');
@@ -1295,10 +1352,69 @@
 
   function deleteConv(id) {
     Object.keys(live).filter(k => k.startsWith(id + '/')).forEach(k => { live[k].ctl.abort(); delete live[k]; });
+    // A conversation that was sent here leaves the inbox with it.
+    if (store.convs[id].inbox) LLM.discard(store.convs[id].inbox);
     delete store.convs[id];
     ui.confirmDel = null;
     if (!Object.keys(store.convs).length) { const c = blankConv(); store.convs[c.id] = c; }
     if (store.current === id) openConv(recent()[0].id); else render();
+  }
+
+  // ---------- the inbox ----------
+  // An answer sent to this page from another conversation with Claude (see
+  // "the inbox" in llm.js) becomes a conversation of its own. Its turns are
+  // ordinary turns whose answers are there already; `given` marks them, and
+  // `noq` one that came without its question. The document stays in the
+  // store, so the reader's other browsers open it too, and `store.taken`
+  // keeps each browser from opening it twice. Deleting the conversation
+  // takes the document out of the store.
+
+  function convFrom(g, docId) {
+    const c = blankConv();
+    c.title = g.title;
+    c.inbox = docId;
+    let parent = null;
+    g.turns.forEach((t, i) => {
+      const id = i ? 'n' + i : 'root';
+      c.nodes[id] = { id, seq: i, parent, anchor: null, q: t.q, prompt: t.prompt, raw: t.raw, phase: 'done', status: 'open', ready: true, given: true };
+      if (t.noq) c.nodes[id].noq = true;
+      parent = id;
+    });
+    c.seq = g.turns.length;
+    c.cols = [{ start: 'root', leaf: parent }];
+    c.tips = { root: parent };
+    return c;
+  }
+
+  // docs: what the inbox holds, [{ id, data }]. Open the ones not seen yet.
+  function takeDocs(docs) {
+    const made = [];
+    const fresh = docs.filter(d => !store.taken[d.id]);
+    if (!fresh.length) return;
+    fresh.forEach(d => {
+      store.taken[d.id] = Date.now();
+      const g = LLM.fromInbox(d.data);
+      if (!g) return; // not an answer: left where it is
+      const c = convFrom(g, d.id);
+      c.updated += made.length; // listed in the order they came
+      store.convs[c.id] = c;
+      made.push(c);
+    });
+    if (!made.length) { save(); return; }
+    const what = made.length === 1 ? 'An answer sent from Claude' : `${made.length} answers sent from Claude`;
+    // Not from under the reader's hands: a question being typed, or the ask menu open.
+    const midway = !!ui.pending || [...document.querySelectorAll('#panes .msg')].some(m => m.value.trim());
+    if (midway) {
+      renderConvs();
+      save();
+      toast(`${what} ${made.length === 1 ? 'is' : 'are'} in the list of conversations.`);
+    } else {
+      // With the answer that was sent to be studied at the top of the view.
+      const c = made[made.length - 1];
+      ui.focus = { start: 'root', node: c.cols[0].leaf };
+      openConv(c.id);
+      toast(`${what} ${made.length === 1 ? 'has opened as a new conversation' : 'have arrived. The latest is open'}.`);
+    }
   }
 
   // ---------- rendering ----------
@@ -1332,6 +1448,8 @@
     const n = $('#notice');
     n.hidden = !msg;
     n.textContent = msg;
+    // How to send an answer here is said only where it can be done.
+    $('#help-inbox').hidden = !rt.inbox;
   }
 
   function renderConvs() {
@@ -1347,7 +1465,7 @@
       } else {
         row.append(
           el('button.open', { title: c.title || 'New conversation', on: { click: () => openConv(c.id) } },
-            el('span.lab', {}, c.title || 'New conversation'), c.example && el('span.tag', {}, 'Example')),
+            el('span.lab', {}, c.title || 'New conversation'), c.example && el('span.tag', {}, 'Example'), c.inbox && el('span.tag', { title: 'Sent here from another conversation with Claude' }, 'Sent')),
           el('button.icon.del', {
             title: 'Delete this conversation', 'aria-label': 'Delete this conversation',
             on: { click: () => { ui.confirmDel = c.id; renderConvs(); } },
@@ -1547,7 +1665,7 @@
 
   function turn(n, ci, path, i) {
     return el('div.turn', { 'data-node': n.id },
-      el('div.user', { class: n.back ? 'back' : '' }, n.back && el('div.tagline', {}, 'Explained back'), el('div.bubble', {}, rich(n.q))),
+      el('div.user', { class: n.back ? 'back' : n.noq ? 'none' : '' }, n.back && el('div.tagline', {}, 'Explained back'), el('div.bubble', {}, rich(n.q))),
       answer(n, ci, path, i));
   }
 
@@ -1580,6 +1698,12 @@
     }
     if (n.truncated) ai.append(el('div.fine', {}, 'This answer reached the length limit and stops early. Ask for the rest, or for less at a time.'));
     if (n.sources && n.sources.length) ai.append(...sources(n.sources));
+    // Where the turns that were sent here end, and the reader's own begin.
+    if (n.given && !(path[i + 1] && N(path[i + 1]).given)) {
+      ai.append(el('div.fine.origin', {}, n.parent
+        ? 'The conversation up to here was written in another chat with Claude and sent here.'
+        : 'This answer was written in another chat with Claude and sent here.'));
+    }
 
     // Other branches that leave from this message, and the way back to it.
     const others = typedKids(n.id).filter(k => k.id !== path[i + 1]);
@@ -2073,7 +2197,7 @@
       title: 'Copy the write-up as Markdown, for pasting into a document',
       on: {
         click: () => {
-          const text = '# ' + N('root').q.replace(/\s+/g, ' ') + '\n\n' + outline('root', 0).join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
+          const text = '# ' + topic() + '\n\n' + outline('root', 0).join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
           // Some views refuse the clipboard; then select the text for a manual copy.
           let done;
           try { done = navigator.clipboard.writeText(text); } catch (e) { done = Promise.reject(e); }
@@ -2085,7 +2209,7 @@
     }, 'Copy as Markdown');
     const sheet = el('div.sheet', {},
       el('div.bar2', {}, el('div.kicker', {}, 'Write-up'), copy, el('button.btn', { on: { click: closeModal } }, 'Close')),
-      el('h1', {}, rich(N('root').q)),
+      el('h1', {}, rich(N('root').noq ? state.title : N('root').q)),
       el('div.note', {}, 'Every branch of the conversation, stitched together in reading order. Side threads are set in under the passage they came from.'));
     stitch('root', sheet);
     const open = Object.values(state.nodes).filter(n => n.anchor && n.status !== 'resolved');
@@ -2280,4 +2404,5 @@
   LLM.onChange(soft);
   render();
   LLM.ready.then(soft);
+  LLM.inbox(takeDocs);
 })();

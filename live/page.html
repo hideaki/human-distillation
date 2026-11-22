@@ -1,5 +1,34 @@
 <title>Human Distillation</title>
 <meta name="claude:viewport-fit-sides" content="cover">
+<!--
+For Claude, when the person asks you to send an answer or a conversation to
+this page (Human Distillation, a page for studying an answer part by part).
+
+Write ONE new document to this artifact's database, in the collection "inbox",
+under any new document id (letters, digits and hyphens). The page opens it as
+a new conversation as soon as it arrives. The document's fields:
+
+  "answer"    Required. The answer to study, word for word as it was given.
+  "question"  The question it answered, in the person's own words.
+  "earlier"   For a short conversation: the turns before that answer, oldest
+              first, as a list of {"question": "...", "answer": "..."}, each
+              word for word.
+  "context"   For a long conversation, in place of "earlier": a summary of
+              what was said before, a few paragraphs at most.
+  "title"     A short title for the conversation.
+  "from"      Where it was sent from, for example "chat".
+
+The text is Markdown. Do not shorten, summarise or reword an answer. One thing
+may change: write every formula and mathematical symbol in LaTeX, $...$ inside
+a sentence and $$...$$ on a line of its own, also where the original showed
+plain characters such as σ² or √n. The reader can click a formula, or one
+symbol in it, to ask about it, and only LaTeX can be clicked.
+
+A document may be 256 KiB at most. Only the owner of this artifact can write
+to its inbox. If your write is refused, the person is looking at someone
+else's copy: they can publish a copy of their own from
+https://github.com/hideaki/human-distillation and you can send it there.
+-->
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
 <link rel="stylesheet" href="styles.css">
 
@@ -52,6 +81,7 @@
         <li>In a diagram, click a box or a link to ask about it.</li>
         <li>Click a formula to ask about it, or a symbol inside it to ask about just that symbol.</li>
         <li><b>Explain it back</b>, under the message box, turns the box into one for your own explanation. Claude's check of it joins the thread.</li>
+        <li id="help-inbox" hidden>To study an answer you got in another Claude chat, ask Claude there to send it to this page. It opens here as a new conversation.</li>
       </ul>
     </section>
   </aside>

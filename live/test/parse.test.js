@@ -12,12 +12,12 @@ const { fromApp, llm } = require('./extract.js');
 
 const app = fromApp([
   'MATH_SRC', 'MATH_RE', 'ATOM_RE', 'clip', 'formulaOnly',
-  'blocks', 'pieces', 'runs',
+  'cells', 'blocks', 'pieces', 'runs',
   'SEG', 'ABBR', 'sentenceSpans',
   'ARROW', 'parseGraph', 'edgeText', 'toMermaid',
   'findTerm', 'iou',
 ]);
-const { blocks, pieces, runs, clip, formulaOnly, parseGraph, edgeText, toMermaid, sentenceSpans, findTerm, iou, MATH_RE } = app;
+const { cells, blocks, pieces, runs, clip, formulaOnly, parseGraph, edgeText, toMermaid, sentenceSpans, findTerm, iou, MATH_RE } = app;
 const LLM = llm();
 
 const types = bs => bs.map(b => b.type);
@@ -123,6 +123,39 @@ test('blocks: an opening that is never closed before a blank line is read as tex
 test('blocks: the order of a whole answer is kept', () => {
   const text = ['Opening.', '', '- a', '- b', '', '$$L = 1$$', '', '```graph', 'A -> B', '```', '', '```', 'code', '```', '', 'Closing.'].join('\n');
   assert.deepEqual(types(blocks(text)), ['p', 'ul', 'math', 'graph', 'code', 'p']);
+});
+
+// Tables and rules: Claude is asked for neither here, but an answer sent in
+// from another conversation often has them.
+
+test('blocks: a table, with the side each column is set to', () => {
+  assert.deepEqual(blocks('| Draws | Error | Note |\n|---:|:---:|---|\n| 1 | big | the start |\n| 4 | half |\n\nAfter it.'), [
+    { type: 'table', head: ['Draws', 'Error', 'Note'], align: ['right', 'center', ''], rows: [['1', 'big', 'the start'], ['4', 'half']] },
+    { type: 'p', text: 'After it.' },
+  ]);
+  // Without the bars at the edges, and straight after a line of text.
+  assert.deepEqual(blocks('Two columns:\na | b\n--- | ---\n1 | 2'), [
+    { type: 'p', text: 'Two columns:' },
+    { type: 'table', head: ['a', 'b'], align: ['', ''], rows: [['1', '2']] },
+  ]);
+});
+
+test('blocks: a line with a bar in it is a table only above a line of dashes', () => {
+  assert.deepEqual(types(blocks('The norm is written |x| here.\nAnd it goes on.')), ['p']);
+  assert.deepEqual(types(blocks('a | b\n\n--- | ---')), ['p', 'p']);
+});
+
+test('cells: a bar inside code or a formula, or written \\|, does not end a cell', () => {
+  assert.deepEqual(cells('| `a | b` | $|x|$ and $\\|v\\|$ | one \\| two |'), ['`a | b`', '$|x|$ and $\\|v\\|$', 'one | two']);
+  assert.deepEqual(cells('a | | c'), ['a', '', 'c']);
+});
+
+test('blocks: a rule is a line of dashes, stars or underscores', () => {
+  assert.deepEqual(types(blocks('Above.\n\n---\n\nBelow.\n\n* * *\n\n___')), ['p', 'hr', 'p', 'hr', 'hr']);
+  // Straight under a line of text it still ends the paragraph.
+  assert.deepEqual(blocks('Above.\n---\nBelow.'), [{ type: 'p', text: 'Above.' }, { type: 'hr' }, { type: 'p', text: 'Below.' }]);
+  // A list item is not one, and neither are two dashes.
+  assert.deepEqual(types(blocks('- item\n\n--')), ['ul', 'p']);
 });
 
 // ---------- runs and pieces ----------

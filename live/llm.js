@@ -34,14 +34,21 @@ const LLM = (() => {
     why: { short: 'Why?', q: 'Why is this true?', ask: 'Why is this true?' },
   };
 
-  const passagePrompt = (text, verb) => `About this part of your answer:\n"${text}"\n\n${VERBS[verb].ask}`;
+  // A question asked with a button is worded here, in English, and reaches
+  // Claude as the person's own turn. Unmarked, Claude takes the English for
+  // the person's language and answers a Japanese thread in English. So every
+  // such question ends with this, and `rules()` says what it means. A typed
+  // question is the person's own words and is not marked.
+  const WORDED = '\n\n(The app worded this request. Answer in the language of the answer it is about, not in the language of this request.)';
+
+  const passagePrompt = (text, verb) => `About this part of your answer:\n"${text}"\n\n${VERBS[verb].ask}${WORDED}`;
   const askPrompt = (text, question) => `About this part of your answer:\n"${text}"\n\n${question}`;
-  const partPrompt = (text, question) => `About this part of your diagram: "${text}"\n\n${question || 'Explain this part further: what it is, and how it relates to what it is connected to.'}`;
-  const formulaPrompt = (text, question) => `About this formula in your answer: ${text}\n\n${question || 'Explain this formula: what each symbol stands for, and what the formula as a whole says, in plain words. Work through a small example with numbers if that helps.'}`;
-  const symbolPrompt = (sym, formula, question) => `About the symbol $${sym}$ in this formula from your answer: ${formula}\n\n${question || 'What does this symbol stand for here, and what does it do in the formula? Answer in a few plain sentences.'}`;
-  const DRAW = 'Show what you just explained as a diagram, with a sentence or two around it.';
-  const termPrompt = term => `About this term in your answer: "${term}"\n\nWhat does it mean here, and why does it matter for this topic?`;
-  const followPrompt = (text, verb) => `Still about the part I pointed at ("${clip(text, 200)}"): ${VERBS[verb].ask}`;
+  const partPrompt = (text, question) => `About this part of your diagram: "${text}"\n\n${question || 'Explain this part further: what it is, and how it relates to what it is connected to.' + WORDED}`;
+  const formulaPrompt = (text, question) => `About this formula in your answer: ${text}\n\n${question || 'Explain this formula: what each symbol stands for, and what the formula as a whole says, in plain words. Work through a small example with numbers if that helps.' + WORDED}`;
+  const symbolPrompt = (sym, formula, question) => `About the symbol $${sym}$ in this formula from your answer: ${formula}\n\n${question || 'What does this symbol stand for here, and what does it do in the formula? Answer in a few plain sentences.' + WORDED}`;
+  const DRAW = 'Show what you just explained as a diagram, with a sentence or two around it.' + WORDED;
+  const termPrompt = term => `About this term in your answer: "${term}"\n\nWhat does it mean here, and why does it matter for this topic?${WORDED}`;
+  const followPrompt = (text, verb) => `Still about the part I pointed at ("${clip(text, 200)}"): ${VERBS[verb].ask}${WORDED}`;
   // "Explain it back": the reader's own account of a thread, to be checked.
   const backPrompt = (subject, text) => `I will now explain ${subject} back in my own words, so that you can check my understanding. Compare it with what you told me above. Reply in three short paragraphs, each starting with its label in bold: "**Right:**" for what I have right, "**Off or missing:**" for what is wrong or missing (or "nothing important"), and "**Check yourself:**" for one question that tests my weakest point, which I may answer in my next message. Be specific and brief, with no diagram.\n\nMy explanation:\n${text}`;
   const PLAIN = `\n\n(For this reply only: plain text, with no ${SEP} section.)`;
@@ -137,7 +144,7 @@ const LLM = (() => {
       '- Use a diagram whenever the answer is about several things and how they relate: a process, a pipeline, a chain of causes, the parts of a system. Do this without being asked, and leave it out when prose alone is clear. Write it as a fenced block that opens with ```graph and holds one relation per line in the form "From -> To : label" (the label is optional, "--" draws a link with no arrow). Use short names of one to four words in plain text with no LaTeX, spell a thing the same way every time it appears, and keep to nine things or fewer. The app draws it, and the person can click any box or link to ask about it. Put it where it helps the text, at most one per answer, and still explain in prose.',
       '- When the question quotes a part of your earlier answer, answer about that part only, in a few sentences, without repeating the answer it came from.',
       '- If you are not sure of something, say so in the sentence where it matters.',
-      '- Reply in the language the person writes in.',
+      '- Reply in the language the person writes in. A question asked with a button is worded by the app, in English whatever the person\'s language, and says so in brackets at its end. Its English tells you nothing about the person\'s language: answer it in the language of the answer it is about.',
       // Claude has no clock, and takes the year its knowledge ends for the present.
       `- Today is ${dateWords(o.today || new Date())}. Your knowledge stops some time before today, so the latest thing you know of may not be the latest there is. When a question is about what is current or recent, go by today's date, and say how far your knowledge goes.`,
     ];
@@ -767,7 +774,7 @@ const LLM = (() => {
     SEP, VERBS, WEB, rt, ready,
     onChange(fn) { changed = fn; },
     ask, side, parse, partSpan,
-    passagePrompt, askPrompt, partPrompt, formulaPrompt, symbolPrompt, termPrompt, followPrompt, backPrompt, DRAW,
+    passagePrompt, askPrompt, partPrompt, formulaPrompt, symbolPrompt, termPrompt, followPrompt, backPrompt, DRAW, WORDED,
     errorText, isFinal: code => FINAL.has(code),
   };
 })();

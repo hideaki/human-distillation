@@ -945,6 +945,7 @@
     has(lastCall().turns[0].content, 'After every answer, however short, add a line containing only @@@', 'The rules sent to Claude');
     has(lastCall().turns[0].content, 'a formula, a symbol or a part of a diagram', 'The rules sent to Claude');
     has(lastCall().turns[0].content, 'so list only the terms that are new in this answer', 'The rules sent to Claude');
+    has(lastCall().turns[0].content, 'A question asked with a button is worded by the app', 'The rules sent to Claude');
     // "I know this" takes the dots away everywhere, not only where it was pressed.
     await click(button($('#gloss'), 'I know this'), '"I know this"');
     await until(() => !$$('#panes .gloss').some(g => txt(g) === 'stand-in runtime'), 'the dots to go from every answer on screen');
@@ -1630,7 +1631,8 @@
           await click(chip(id, 'Show me an example'), 'the chip "Show me an example"');
           const v = await fresh(had);
           same([node(v).q, node(v).verb, node(v).parent], ['Show me an example', 'example', id], 'The new turn');
-          eq(node(v).prompt, `Still about the part I pointed at ("${KINDS[kind].about}"): Give me one concrete example of this.`, 'The question sent');
+          // It ends by saying that the app worded it (`WORDED` in llm.js).
+          has(node(v).prompt, `Still about the part I pointed at ("${KINDS[kind].about}"): Give me one concrete example of this.\n\n(The app worded this request.`, 'The question sent');
           await answered(v);
           has(txt(answerText(v)), SIDE_REPLY, 'The answer');
           ok(!chipLabels(id).includes('Show me an example'), 'A question already asked is not offered again');

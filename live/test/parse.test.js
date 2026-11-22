@@ -501,6 +501,24 @@ test('prompts: each kind of pointing names what was pointed at', () => {
   assert.match(LLM.followPrompt('a sentence.', 'why'), /^Still about the part I pointed at \("a sentence\."\): Why is this true\?/);
 });
 
+// The page words a button's question in English. Claude would take that for
+// the person's language, so each one says at its end that the app wrote it.
+test('prompts: a question the app worded says so, and a typed one does not', () => {
+  const worded = [
+    LLM.passagePrompt('a sentence.', 'explain'), LLM.passagePrompt('a sentence.', 'why'),
+    LLM.formulaPrompt('$$L = 1$$', ''), LLM.symbolPrompt('\\alpha', '$$L = \\alpha$$', ''), LLM.partPrompt('A', ''),
+    LLM.termPrompt('logits'), LLM.followPrompt('a sentence.', 'example'), LLM.DRAW,
+  ];
+  for (const p of worded) assert.ok(p.endsWith(LLM.WORDED), p);
+  const typed = [
+    LLM.askPrompt('a sentence.', 'なぜ？'), LLM.formulaPrompt('$$L = 1$$', 'なぜ？'),
+    LLM.symbolPrompt('\\alpha', '$$L = \\alpha$$', 'なぜ？'), LLM.partPrompt('A', 'なぜ？'),
+    LLM.backPrompt('this whole conversation', 'それは X です。'),
+  ];
+  for (const p of typed) assert.ok(!p.includes(LLM.WORDED), p);
+  assert.match(LLM.WORDED, /^\n\n\(.*language of the answer.*\)$/);
+});
+
 test('prompts: an explanation to be checked names what it explains, and comes last', () => {
   const p = LLM.backPrompt('this whole conversation', 'It is X.\nBecause Y.');
   assert.match(p, /^I will now explain this whole conversation back in my own words/);

@@ -85,6 +85,12 @@ uses the user's existing connections with no sign-in of its own.
   `@@@` followed by `term: <term> = <definition>` and `next: <question>` lines.
   Formulas are LaTeX: `$...$` in a sentence, `$$...$$` on a line of its own.
 - The model is chosen by tier (Fast, Balanced, Deep), not by name.
+- A question asked with a button is worded by the page in English and
+  reaches Claude as the person's turn. Each ends with `WORDED`, which says
+  the app wrote it and asks for the language of the answer it is about, and
+  `rules()` explains the mark. Without it a Japanese thread is often
+  answered in English. A typed question is not marked. Add `WORDED` to any
+  new prompt the page words.
 - Claude reads Notion through two functions the page lends it for one
   question, `notion_search` and `notion_fetch`. The page makes the connector
   call itself and hands the result back, and what it hands back may be 32 KB

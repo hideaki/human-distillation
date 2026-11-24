@@ -84,10 +84,11 @@ an answer loses you, which happens a lot with hard material.
   reads web pages through the Parallel Search connector, for what is recent
   or what it is not sure of, and links the page each point comes from. Every
   question also tells Claude today's date, so that "the latest" means now.
-- **Answers from another chat.** On your own copy, ask Claude in any chat to
-  send an answer, or the conversation that led to it, to Human Distillation.
-  It opens in the page as a new conversation, and every part of it can be
-  asked about. See [Send an answer from another chat](#send-an-answer-from-another-chat).
+- **Answers from another chat.** An answer you got in any Claude chat can be
+  studied here. Ask Claude there to send it to your copy of the page, alone
+  or with a summary of the chat so far. It opens as a new conversation, and
+  every part of it can be asked about. See
+  [Send an answer from another chat](#send-an-answer-from-another-chat).
 - **A map.** The sidebar shows the tree, with what is open, queued and
   resolved, and a button to the next open question.
 - **Write it up.** Turns the whole tree into one document.
@@ -101,7 +102,8 @@ an answer loses you, which happens a lot with hard material.
 The app runs as a Claude artifact, and that is the one way to use it for
 real: the answers come from Claude, on your own account. The link under the
 [demo](#demo) opens a shared copy. To have one of your own, publish it as
-described below.
+described below. Sending an answer in from another chat works only on a
+copy of your own.
 
 It has no server and no API key. It is one HTML file that Claude hosts
 as an artifact, a page on claude.ai that is private until you share it. The
@@ -188,30 +190,51 @@ connected" in place of its tick box. A click on it says how to add it.
 
 ### Send an answer from another chat
 
+A hard answer often turns up in an ordinary Claude chat, in the middle of
+other work. It can be moved here to be studied, without asking the question
+again.
+
 This needs a copy of your own, published with `db` as above. In any Claude
-chat, after an answer you want to study, say for example:
+chat, after the answer you want to study, say for example:
 
-> Send that answer to my Human Distillation artifact.
+> Send that answer, with its question, to this artifact:
+> `https://claude.ai/artifact/…` (the link of your copy)
 
-Give Claude the artifact's link if it does not find the page by name. Claude
-reads the note at the top of the page, which says what to write, and writes
-one document to the page's inbox: the answer word for word, the question,
-and, if you ask for it, the earlier turns of the chat or a summary of them.
-The page opens it as a new conversation, at once if it is open and otherwise
-the next time it is. From there it is an ordinary conversation of the page.
+Claude reads the page, finds the note at its top that says what to write,
+and writes one document to the page's inbox. The page opens it as a new
+conversation: at once if the page is open, and otherwise the next time it
+is. Its row in the list of conversations is marked "Sent". From there it is
+an ordinary conversation of the page. Any sentence, formula or table cell of
+the sent answer can be asked about, and the thread can be carried on by
+typing.
 
-- **Earlier turns or a summary.** Earlier turns that were sent become turns
-  of the conversation, and each can be asked about. A summary is not a turn:
-  it sits folded in one line above the conversation, "Summary of the earlier
-  chat", and Claude is given it with every question asked there.
+![An answer sent from a chat, open in the page: its question, a formula and a table, with the summary of the earlier chat folded in one line above it](docs/sent-answer.png)
+
+What can be sent, and how to ask for it:
+
+| You ask for | What arrives |
+| --- | --- |
+| The answer | The answer, word for word, and the question it replied to |
+| "…with a summary of our conversation so far" | The same, and a summary. It sits folded in one line above the conversation, "Summary of the earlier chat", and Claude is given it with every question asked there |
+| "…with the turns before it" | The earlier questions and answers as turns of the conversation, each of which can be asked about. For a short chat |
+
+A few things about it:
+
 - **Formulas.** The note asks Claude to write formulas in LaTeX, since only
-  those can be clicked. A chat sometimes writes a symbol as a plain character.
+  those can be clicked. A chat sometimes writes a symbol in a sentence as a
+  plain character all the same.
+- **Tables and headings.** An answer from a chat often has them. The page
+  draws a table as a table and a heading as a bold line. Its own answers
+  have neither.
 - **Not on the shared copy.** Only the owner of an artifact can write to its
   store, so nobody can send an answer to a copy they were only given a link
   to. This is why you need your own.
 - **Where the document stays.** In the artifact's store on Claude's side,
   readable by you alone, until you delete the conversation in the page. Your
-  other browsers open it from there too.
+  other browsers and devices open it from there too. What you ask after that
+  stays in the one browser, like any conversation of the page.
+- **Without a browser.** The page does not have to be open when the answer
+  is sent.
 
 ### Good to know
 
@@ -239,7 +262,9 @@ the next time it is. From there it is an ordinary conversation of the page.
 Build again and ask Claude Code to publish the file to the same link. When
 the capabilities are not mentioned, the ones already declared are kept. To
 add a connector later, state the whole set again: a stated set replaces the
-one that was there. In a
+one that was there. The same goes for a copy that was published before the
+inbox existed: to give it one, state the whole set once, with `db` and its
+rule. In a
 new Claude Code conversation, give it the link, or it makes a second
 artifact.
 
@@ -407,6 +432,26 @@ to that collection, `LLM.fromInbox` turns a document into turns, and
 owner read or write `inbox`. The store's own rules already refuse a write
 from anyone outside the owner's organization, so a visitor to a shared copy
 can neither send to it nor see what was sent.
+
+A document of the inbox has these fields. Only `answer` is required:
+
+| Field | What it holds |
+| --- | --- |
+| `answer` | The answer to study, as Markdown with formulas in LaTeX |
+| `question` | The question it answered |
+| `earlier` | The turns before it, oldest first: a list of `{ "question", "answer" }` |
+| `context` | In place of `earlier`, for a long chat: a summary of what was said before |
+| `title` | A title for the conversation. Without one, the first question names it |
+| `from` | Where it was sent from |
+
+The sent turns reach Claude as its own earlier answers, on the path like any
+other turn. The first of them carries a note from the app: that these
+answers were written in another chat, and that what is asked after them is
+to be answered in the page's own format. The summary travels in that same
+turn. A document may be 256 KiB, and it stays in the store until its
+conversation is deleted in the page, so that the owner's other browsers
+open it too. Each browser keeps the ids it has opened, and opens a document
+once.
 
 This describes the runtime as it was in November 2026. It is Claude's, not
 this project's, and it may change.
@@ -600,14 +645,26 @@ Words in a question steer the stand-in, for trying the awkward paths:
 `?missing=web` or `?missing=notion` in the page's address plays a viewer who
 has not added that connector.
 
+The inbox has a stand-in too, a store kept in the browser:
+
+| In the page's address | What it plays |
+| --- | --- |
+| `?send=sample` | a sample answer, with a summary, arrives a moment after the page loads |
+| `?missing=db` | a copy published without the store: no inbox |
+| `?visitor` | a viewer who is not the owner of the copy: the inbox reads empty |
+
+`claude.deliver({ answer: "…" })` in the browser's console sends any other
+document, as a Claude chat would.
+
 ## Tests
 
 ```bash
 npm test
 ```
 
-This runs the parsing tests, the Notion tests, the web tests and a static
-check (ESLint, if one is installed; skipped otherwise). It needs Node and installs nothing.
+This runs the parsing tests, the Notion tests, the web tests, the inbox
+tests and a static check (ESLint, if one is installed; skipped otherwise).
+It needs Node and installs nothing.
 
 The flow tests click through the real page against the stand-in. They run in
 a browser: start the preview server and open http://localhost:4174/test. A
@@ -622,7 +679,8 @@ every kind of thread (main, passage, formula, symbol, diagram part).
       page.html           the page, in the form Claude publishes
       styles.css
       llm.js              all that talks to Claude: instructions, prompts,
-                          calls, and the parsing of what comes back
+                          calls, the parsing of what comes back, and the
+                          inbox
       app.js              the rest
       dev-runtime.js      the stand-in for Claude, for local work only
       dev.py              the local preview server

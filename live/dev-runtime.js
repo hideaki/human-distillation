@@ -349,11 +349,8 @@
   const SAMPLE = {
     from: 'chat',
     title: 'Why the standard error shrinks',
-    earlier: [{
-      question: 'What is a standard error?',
-      answer: 'The **standard error** of a statistic is the standard deviation of that statistic across repeated samples. For the sample mean it says how far a mean of $n$ draws typically lands from the true mean.',
-    }],
-    question: 'Why does it shrink with the square root of n?',
+    context: 'We started from what a sample mean is: the average of $n$ independent draws from the same distribution. You then asked how much such an average varies from one sample to the next, and we named that spread the **standard error**.',
+    question: 'Why does the standard error shrink with the square root of n?',
     answer: [
       '## The short answer',
       '',
@@ -369,7 +366,7 @@
       '|---:|:---:|---|',
       '| 1 | $\\sigma$ | the same |',
       '| 4 | $\\sigma / 2$ | half |',
-      '| 100 | $\\sigma / 10$ | a tenth, written `sigma | 10` in code |',
+      '| 100 | $\\sigma / 10$ | a tenth |',
       '',
       'Halving the error takes four times the data. This relies on the draws being independent.',
     ].join('\n'),

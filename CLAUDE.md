@@ -27,9 +27,11 @@ in step when a feature is added or the way to publish changes.
                           file that is published (git-ignored)
       test/, TESTING.md   the regression tests
     README.md, LICENSE    for readers of the repository (MIT)
-    docs/                 the README's two screenshots, taken from the worked
-                          example in the local preview. Retake them when the
-                          page's look changes. Also `demo.gif` and `demo.mp4`,
+    docs/                 the README's screenshots, from the local preview in
+                          its light colours, 1360x900 at twice the density.
+                          Two show the worked example; `sent-answer.png` is
+                          `/?send=sample`, taken with headless Chrome. Retake
+                          them when the page's look changes. Also `demo.gif` and `demo.mp4`,
                           recorded on the live artifact with Claude's own
                           answers: frames from the Chrome extension's
                           recorder, cut with ffmpeg (Claude's bar cropped,

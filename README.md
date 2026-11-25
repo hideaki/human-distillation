@@ -717,8 +717,9 @@ November 2026 and is not complete.
 
 ## Status
 
-A prototype, built to find out whether this shape of conversation helps. It
-has been used on real questions by its author and has had no user study.
+A prototype, built to find out whether this shape of conversation helps.
+I have been using it on real questions and work on daily basis, which has
+been helping me a lot, but it has had no user study.
 
 ## License
 

@@ -2336,7 +2336,7 @@
         el('div.lab', {}, el('span', {}, 'Get help')),
         // A question that has a thread is helped there: the menu leads to
         // it and asks nothing new, as a passage with a thread opens it.
-        th ? el('div.line.helps', {}, el('button', { on: { click: () => { closePop(); showThread(th); } } }, 'Open the thread'))
+        th ? el('div.line.helps', {}, el('button.btn', { on: { click: () => { closePop(); showThread(th); } } }, 'Open the thread'))
           : el('div.line.helps', {},
             el('button', { disabled: off, title: off ? 'Open this page inside Claude to get help with a question.' : null, on: { click: () => helpWith(id, 'help') } }, LLM.HELPS.help.q),
             more)));

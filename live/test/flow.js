@@ -1912,6 +1912,8 @@
     await until(() => !pane(th), 'the thread to close');
     await click(qmark(2), 'the second question');
     same([$$('.helps button', await askMenu()).map(txt), !!$('#pop-ask')], [['Open the thread'], false], 'The help its menu offers now');
+    // It leads somewhere and asks nothing, so it is a button and not a pill.
+    ok($('.helps button', pop()).classList.contains('btn'), '"Open the thread" is drawn as a button');
     // A scroll closes the menu, and a page that is not on screen hears of
     // the scroll that closing the thread made only now.
     await sleep(200);

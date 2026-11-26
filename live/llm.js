@@ -78,6 +78,10 @@ const LLM = (() => {
   const CHECK_AGAIN = 'I have changed my answers. Check them together again in the same way, and say which of the points you raised before are now settled.' + WORDED;
 
   const oneLine = (v, n) => clip(String(v || '').replace(/\s+/g, ' ').trim(), n);
+  // How much of a question is kept: it may carry the options and the
+  // recommendation the asker gave with it. The reply has only its start,
+  // since the chat that asked wrote it and needs only to know it again.
+  const ASKED = 1500, RECALLED = 200;
   // The sheet as Claude is told it: every question with the reader's answer
   // so far. It is added to the turn being asked and not kept in it, so each
   // thread works from the answers as they stand now, whatever it said
@@ -85,7 +89,7 @@ const LLM = (() => {
   function sheetNote(sheet, about) {
     const asks = (sheet && sheet.asks) || [];
     if (!asks.length) return '';
-    const lines = asks.map((a, i) => `${i + 1}. ${oneLine(a.q, 600)}\n   `
+    const lines = asks.map((a, i) => `${i + 1}. ${oneLine(a.q, ASKED)}\n   `
       + (a.state === 'answered' ? `My answer: ${oneLine(a.answer, 2000)}${a.why ? '\n   Why: ' + oneLine(a.why, 1000) : ''}`
         : a.state === 'left' ? 'Left to you.' : 'Not answered yet.'));
     const at = asks.findIndex(a => a.id === about);
@@ -99,9 +103,9 @@ const LLM = (() => {
     const asks = (sheet && sheet.asks) || [];
     const num = a => asks.indexOf(a) + 1;
     const done = asks.filter(a => a.state !== 'open'), open = asks.filter(a => a.state === 'open');
-    const out = done.map(a => `${num(a)}. ${oneLine(a.q, 600)}\n   `
+    const out = done.map(a => `${num(a)}. ${oneLine(a.q, RECALLED)}\n   `
       + (a.state === 'left' ? 'Your call.' : oneLine(a.answer, 2000) + (a.why ? `\n   (${oneLine(a.why, 1000)})` : '')));
-    if (open.length) out.push((done.length ? '\n' : '') + 'Not answered yet:', ...open.map(a => `${num(a)}. ${oneLine(a.q, 600)}`));
+    if (open.length) out.push((done.length ? '\n' : '') + 'Not answered yet:', ...open.map(a => `${num(a)}. ${oneLine(a.q, RECALLED)}`));
     return out.join('\n') + '\n';
   }
 
@@ -238,7 +242,9 @@ const LLM = (() => {
   //   context   or, for a long conversation, a summary of what came before
   //   title     a title for the conversation
   //   from      where it was sent from
-  //   questions the questions `answer` asks the reader: [{ quote, question }]
+  //   questions what the reader is left to answer or decide, one entry for
+  //             each decision: [{ quote, question }]. `quote` only where
+  //             `answer` itself puts the question
   // -> { title, from, turns: [{ q, noq, prompt, raw }], asks: [{ quote, q }] }
   // `asks` is there only when a question was listed.
   // `prompt` is what Claude is given as the person's turn. The first one says
@@ -267,9 +273,11 @@ const LLM = (() => {
     const title = clip((words(data.title) || pairs[0].q || pairs[k - 1].q || opening || 'An answer sent from Claude').replace(/\s+/g, ' '), 90);
     const out = { title, from: clip(words(data.from), 40), turns };
     // `quote` is where the answer asks it, `question` what it asks, said so
-    // that it can be read alone. One without its question is left out.
+    // that it can be read alone, with the options the asker gave. One
+    // without its question is left out. One without a quote is kept: the
+    // answer may only point to it.
     const asks = (Array.isArray(data.questions) ? data.questions : [])
-      .map(x => (x && typeof x === 'object' ? { quote: clip(words(x.quote), 2000), q: clip(words(x.question).replace(/\s+/g, ' '), 600) } : null))
+      .map(x => (x && typeof x === 'object' ? { quote: clip(words(x.quote), 2000), q: clip(words(x.question).replace(/\s+/g, ' '), ASKED) } : null))
       .filter(x => x && x.q).slice(0, 40);
     if (asks.length) out.asks = asks;
     return out;
@@ -296,7 +304,7 @@ const LLM = (() => {
       '- Terms you list at the end of an answer get a dotted underline, and hovering shows your one-line definition.',
     ];
     if (o.sheet) {
-      lines.push('- The answer that was sent here asks this person questions. They are working out their answers one at a time, to take back to the chat that asked. A note at the end of their message lists those questions and the answers so far. Treat an answer there as decided unless they reopen it, and go by the note where it differs from what you said earlier.');
+      lines.push('- The answer that was sent here asks this person questions. They are working out their answers one at a time, to take back to the chat that asked. A note at the end of their message lists those questions and the answers so far. Some of them the sent answer only points to, and the note is then all there is of them here. Options and a recommendation that come with a question in the note were given by the asker. Treat an answer there as decided unless they reopen it, and go by the note where it differs from what you said earlier.');
     }
     lines.push(
       '',

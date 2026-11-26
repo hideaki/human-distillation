@@ -1972,6 +1972,66 @@
     eq(ids().length, before.length, 'No thread was started');
   });
 
+  test('Questions', 'a decision the answer only points to: listed with no quote, shortened in its row and in the reply, whole in its menu and for Claude', async () => {
+    // Worded with its options and the recommendation, so it is long.
+    const LONG = 'How long should the exported files be kept? The options in the plan were three months, a year, or for good. I recommended a year. '
+      + Array(9).fill('Three months is too short to compare a month with the same month of the year before, and keeping them for good means nobody clears out old files.').join(' ');
+    ok(LONG.length > 1200 && LONG.length < 1500, `The question of this test has ${LONG.length} characters`);
+    const SHORT = 'Does the exported file need a header row?';
+    const sentDoc = {
+      from: 'chat', title: 'Two choices', question: 'What is left to decide?',
+      answer: 'Two things are left. Does the file need a header row? The other choice is in the plan I wrote before: how long the files are kept.',
+      questions: [{ quote: 'Does the file need a header row?', question: SHORT }, { question: LONG }],
+    };
+    await load({ inbox: { q: sentDoc } });
+    await until(() => conv().inbox === 'q' && mainText() && strip(), 'the document to open, with its questions');
+    same($$('.askq', mainText()).map(e => e.dataset.ask), ['q1'], 'The marks');
+    same(qsheet().asks.map(a => [a.q, a.quote, a.start != null]), [[SHORT, 'Does the file need a header row?', true], [LONG, '', false]], 'The sheet');
+    eq(stripLine(), '▸ 2 questions for you, 0 settled', 'The strip');
+    await click($('.fold', strip()), 'the folded strip');
+    await until(() => qrows().length === 2, 'the rows');
+    // Its row has the question whole and shows the first two lines of it.
+    const row = () => $('.qrow[data-ask="q2"]', strip());
+    const cell = $('.q', row());
+    const line = parseFloat(win.getComputedStyle(cell).lineHeight);
+    eq(txt(cell), LONG, 'The row of the long question');
+    ok(line > 0 && cell.clientHeight <= 2 * line + 2 && cell.scrollHeight > cell.clientHeight, `Its row shows two lines of it (${cell.clientHeight}px of ${cell.scrollHeight}px, a line is ${line}px)`);
+
+    // The menu has it whole, in a box that scrolls, and stays in the window.
+    await click(row(), 'the row of the long question');
+    const m = await askMenu(), mq = $('.q', m), at = m.getBoundingClientRect();
+    eq(txt(mq), LONG, 'The menu says the question whole');
+    ok(mq.scrollHeight > mq.clientHeight, 'The question scrolls in its menu');
+    ok(at.top >= 0 && at.bottom <= win.innerHeight, `The menu fits the window (${Math.round(at.top)} to ${Math.round(at.bottom)} of ${win.innerHeight})`);
+    ok(!button(m, 'Show in the text'), 'It has no place in the text to show');
+    mq.scrollTop = 40;
+    mq.dispatchEvent(new win.Event('scroll'));
+    await sleep(150);
+    ok(pop(), 'Scrolling the question leaves its menu open');
+
+    // Claude gets it whole: in the request, and in the note of the answers.
+    const before = ids();
+    await click(button(pop(), 'Help me answer'), '"Help me answer"');
+    const th = await fresh(before, 'the help to be asked');
+    await answered(th);
+    await until(() => pane(th), 'the thread to open beside the answer');
+    same([node(th).anchor.ask, node(th).anchor.text, node(th).anchor.start >= 1e9], ['q2', LONG, true], 'The thread');
+    has(node(th).prompt, `About this question you asked me: "${LONG}"`, 'What is asked');
+    has(lastCall().prompt, `2. ${LONG}\n   Not answered yet.`, 'The note sent with it');
+
+    // The reply has the start of it: the chat that asked knows the rest.
+    await click(row(), 'the row of the long question');
+    await askMenu();
+    type($('#pop-q'), 'A year');
+    key($('#pop-q'), 'Enter');
+    await until(() => entry(2).answer === 'A year', 'the answer to be kept');
+    const grab = clipboard();
+    await click(button(strip(), 'Copy reply'), '"Copy reply"');
+    eq(await until(() => grab.text, 'the reply'), `2. ${LONG.slice(0, 199).trimEnd()}…\n   A year\n\nNot answered yet:\n1. ${SHORT}\n`, 'The reply');
+    tidy('A question the answer only points to');
+    noSideways('A question the answer only points to');
+  });
+
   test('Questions', '"Check them together" reads all the answers in a thread of its own, and checking again continues it', async () => {
     await sentWithQuestions();
     const check = () => button(strip(), 'Check them together');

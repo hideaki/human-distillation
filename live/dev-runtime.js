@@ -25,7 +25,7 @@
 //   claude.deliver(data, id)   in the console: plays that conversation's Claude
 //                     writing a document to the inbox
 //   ?send=sample      a sample document arrives a moment after the page loads
-//   ?send=questions   one whose answer asks the reader three questions
+//   ?send=questions   one whose answer asks the reader four questions
 //   #offer            in the thread of such a question: the reply proposes an answer
 //                     ("What would you pick?" always does)
 //   ?missing=db       the page was published without the store: no inbox
@@ -406,7 +406,9 @@
   };
   // An answer that asks the reader things, with the questions listed as the
   // sending chat is asked to list them. The second leans on its sentence,
-  // and the quote of the third differs from the text in its markup.
+  // and the quote of the third differs from the text in its markup. The
+  // fourth the answer only points to: it has no quote, and it is worded
+  // with the options and the recommendation given for it elsewhere.
   const QUESTIONS = {
     from: 'chat',
     title: 'A monthly export of the readings',
@@ -420,11 +422,14 @@
       'It also matters who reads it. A file that leaves your team should not carry the device ids. Will it?',
       '',
       'Last, the timestamps. The readings are stored in **UTC**, and I can leave them so or convert them. Which do you want: `UTC` or local time?',
+      '',
+      'One choice from the plan I wrote before also still waits for you: how long the files are kept.',
     ].join('\n'),
     questions: [
       { quote: 'Does the file need to open in a spreadsheet?', question: 'Does the exported file need to open in a spreadsheet?' },
       { quote: 'Will it?', question: 'Will the exported file be read by anyone outside your team?' },
       { quote: 'Which do you want: `UTC` or local time?', question: 'Should the timestamps in the export be in UTC or in local time?' },
+      { question: 'How long should the exported files be kept? The options in the plan were three months, a year, or for good. I recommended a year. Three months is too short to compare a month with the same month of the year before. Keeping them for good costs little, about 40 MB a year, but then nobody clears out old files that carry device ids.' },
     ],
   };
   if (asked.get('send') === 'sample') setTimeout(() => deliver(SAMPLE, 'sample'), 1500);

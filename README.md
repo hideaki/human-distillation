@@ -248,6 +248,8 @@ needs from you before it goes on. Sent to the page, such an answer arrives
 with its questions marked, and you can settle them one at a time.
 
 - **The marks.** Each question is highlighted where it stands in the text.
+  One that the answer only points to, such as a choice it left open in an
+  earlier turn or in a file, has no mark and is in the sheet below.
   A click opens its menu, which has two parts. "Your answer" has a box for
   the answer and one for your reason, and "Leave it to the asker", which
   hands the decision back to the chat that asked. "Get help" has one
@@ -271,11 +273,14 @@ with its questions marked, and you can settle them one at a time.
   again after a change continues that thread.
 - **Copy reply.** Puts the questions with your answers and reasons on the
   clipboard, for pasting into the chat that asked. Questions still open are
-  listed as not answered yet.
+  listed as not answered yet. A long question is given by its start, since
+  the chat that asked wrote it.
 
-For this the sending chat lists the questions its answer asks, which the
-note at the top of the page tells it to do. An answer sent without that list
-is an ordinary sent answer. Your answers stay in the one browser, like any
+For this the sending chat lists what its answer leaves for you to decide,
+which the note at the top of the page tells it to do: one entry for each
+decision, never one for a whole batch of them, each worded with the options
+and the recommendation it had given. An answer sent without that list is an
+ordinary sent answer. Your answers stay in the one browser, like any
 conversation of the page.
 
 ### Good to know
@@ -485,7 +490,7 @@ A document of the inbox has these fields. Only `answer` is required:
 | `context` | In place of `earlier`, for a long chat: a summary of what was said before |
 | `title` | A title for the conversation. Without one, the first question names it |
 | `from` | Where it was sent from |
-| `questions` | The questions `answer` asks the reader: a list of `{ "quote", "question" }`. `quote` is the words of the answer where it is asked, `question` the same question said so that it stands alone |
+| `questions` | What `answer` leaves for the reader to answer or decide, one entry for each decision: a list of `{ "quote", "question" }`. `question` is the question said so that it stands alone, with the options and the recommendation the chat had given, 1,500 characters at most. `quote` is the words of the answer where it is put, and is left out for a question the answer only points to |
 
 The sent turns reach Claude as its own earlier answers, on the path like any
 other turn. The first of them carries a note from the app: that these
@@ -499,7 +504,8 @@ once.
 The questions a document lists become the conversation's sheet (`sheet` on
 the conversation, in `app.js`): one entry per question, with the reader's
 answer, reason and state. The page finds each `quote` in the drawn text and
-marks it. Only the reader's own actions write to the sheet. Claude's reply
+marks it. An entry with no quote, or with one that is not found, has no mark
+and is reached from the strip. Only the reader's own actions write to the sheet. Claude's reply
 in a question's thread may end with `answer:` and `why:` lines under the
 `@@@`, which the page shows as a proposal with a button. Every question
 asked in that conversation is sent with the sheet as it stands, added to
@@ -705,7 +711,7 @@ The inbox has a stand-in too, a store kept in the browser:
 | In the page's address | What it plays |
 | --- | --- |
 | `?send=sample` | a sample answer, with a summary, arrives a moment after the page loads |
-| `?send=questions` | a sample answer that asks the reader three questions |
+| `?send=questions` | a sample answer that asks the reader four questions, the last of them one it only points to |
 | `?missing=db` | a copy published without the store: no inbox |
 | `?visitor` | a viewer who is not the owner of the copy: the inbox reads empty |
 

@@ -53,7 +53,8 @@ in step when a feature is added or the way to publish changes.
   (with `#parts` or `#skim` for a long page, read whole or only its start).
   `?missing=web` or `?missing=notion` in the page's address plays a viewer
   who has not added that connector. For the inbox: `?send=questions` has a
-  sample answer arrive that asks the reader three questions (in a question's
+  sample answer arrive that asks the reader four questions, the last with
+  no quote and worded with its options (in a question's
   thread, "What would you pick?" or `#offer` makes the stand-in propose an
   answer), `?send=sample` has a
   sample answer arrive, `claude.deliver({...})` in the console sends any
@@ -149,7 +150,13 @@ uses the user's existing connections with no sign-in of its own.
   twice in one browser. The document stays in the store until its
   conversation is deleted.
 - The sheet: a sent document may list the questions its answer asks the
-  reader (`questions`: `quote` and `question`). They become `state.sheet`,
+  reader (`questions`: `quote` and `question`). The note in `page.html` asks
+  for one entry per decision, never one for a batch, and for the options and
+  the recommendation the asker gave in `question`, which may be 1,500
+  characters (`ASKED` in `llm.js`). One the answer only points to comes
+  with no `quote`. Claude here gets each question whole; a row of the strip
+  shows two lines of it and "Copy reply" its first 200 characters
+  (`RECALLED`). They become `state.sheet`,
   one per conversation: `{ rev, checked, copied, node, asks }`. `findQuote`
   places each quote in the drawn text, by its letters and digits where the
   markup differs. Only the reader's actions write to the sheet (`settle`).

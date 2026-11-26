@@ -42,6 +42,31 @@ test('a sent document may list the questions its answer asks', () => {
   ]);
 });
 
+test('a question may carry its options: 1,500 characters are kept, Claude gets them all, and the reply has the start', () => {
+  const said = 'How long should the files be kept? ' + 'The options were three months, a year, or for good. '.repeat(12).trim();
+  assert.ok(said.length > 600 && said.length < 1500);
+  // One the answer only points to has no quote, and is kept.
+  const g = LLM.fromInbox({ answer: 'One choice still waits for you.', questions: [{ question: said }, { question: said + ' ' + said + ' ' + said }] });
+  assert.deepEqual(g.asks[0], { quote: '', q: said });
+  assert.ok(g.asks[1].q.length <= 1500 && g.asks[1].q.length > 1490 && g.asks[1].q.endsWith('…'));
+  assert.ok(g.asks[1].q.startsWith(said + ' ' + said));
+
+  const sheet = { asks: [entry('q1', said, 'answered', 'A year'), entry('q2', 'Only this?', 'open')] };
+  assert.ok(LLM.sheetNote(sheet, 'q1').includes(`1. ${said}\n   My answer: A year`));
+  // The chat that asked wrote the question: the reply needs only enough to know it by.
+  const start = said.slice(0, 199).trimEnd() + '…';
+  assert.ok(start.length <= 200);
+  assert.equal(LLM.replyText(sheet), `1. ${start}\n   A year\n\nNot answered yet:\n2. Only this?\n`);
+  const open = { asks: [entry('q1', said, 'open')] };
+  assert.equal(LLM.replyText(open), `Not answered yet:\n1. ${start}\n`);
+});
+
+test('Claude is told that a question may be all there is of it, and that its options were given by the asker', async () => {
+  const told = (await sent({ sheet: SHEET, about: 'q2' }))[0].content;
+  assert.ok(told.includes('Some of them the sent answer only points to, and the note is then all there is of them here.'));
+  assert.ok(told.includes('Options and a recommendation that come with a question in the note were given by the asker.'));
+});
+
 test('a document that lists no question has no sheet', () => {
   assert.ok(!('asks' in LLM.fromInbox({ answer: 'An answer.' })));
   assert.ok(!('asks' in LLM.fromInbox({ answer: 'An answer.', questions: [] })));

@@ -2274,9 +2274,10 @@
   const askTitle = a => (a.state === 'answered' ? 'Your answer: ' + clip(a.answer, 140)
     : a.state === 'left' ? 'Left to the asker. Click to change that.' : 'A question for you. Click to answer it, or to get help with it.');
 
-  // The menu of one question: an answer typed there, the helps, and leaving
-  // it to the asker. It opens at the question in the text, or at its row.
-  function openAskPop(id, rect) {
+  // The menu of one question, in two parts: answering it now, and getting
+  // help with it. It opens at the question in the text (`atMark`), at its
+  // row of the sheet, or from its thread.
+  function openAskPop(id, rect, atMark) {
     const a = askById(id);
     if (!a) return;
     hideGloss();
@@ -2285,7 +2286,7 @@
     const pop = $('#pop');
     pop.textContent = '';
     pop.classList.add('askpop');
-    const th = askThread(id);
+    const th = askThread(id), off = offline();
     const box = el('input', { type: 'text', id: 'pop-q', placeholder: 'Type your answer…', 'aria-label': 'Your answer', autocomplete: 'off', value: a.state === 'answered' ? a.answer : null });
     const why = el('input', { type: 'text', id: 'pop-why', placeholder: 'Your reason, if you want to give one', 'aria-label': 'Your reason', autocomplete: 'off', value: a.state === 'answered' && a.why ? a.why : null });
     const keep = () => {
@@ -2298,19 +2299,37 @@
       if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229) { ev.preventDefault(); keep(); }
     }));
     const mark = $(`#panes .askq[data-ask="${id}"]`);
+    // Getting help: one button for the common case and a box for anything
+    // more specific, as in the menu of a passage. Enter in the empty box is
+    // the button.
+    const more = el('input', {
+      type: 'text', id: 'pop-ask', placeholder: 'Ask about this question…', 'aria-label': 'Your question about this question', autocomplete: 'off',
+      disabled: off, title: off ? 'Open this page inside Claude to get help with a question.' : null,
+    });
+    more.addEventListener('keydown', ev => {
+      if (ev.key !== 'Enter' || ev.isComposing || ev.keyCode === 229) return;
+      ev.preventDefault();
+      if (more.value.trim()) askAbout(id, more.value); else helpWith(id, 'help');
+    });
     pop.append(
       el('div.q', {}, rich(a.q)),
-      el('div.line', {}, box, el('button.primary', { on: { click: keep } }, 'Save')),
-      el('div.line', {}, why),
-      el('div.line.helps', {}, Object.keys(LLM.HELPS).map(k => el('button', {
-        disabled: offline(), title: offline() ? 'Open this page inside Claude to get help with a question.' : null,
-        on: { click: () => helpWith(id, k) },
-      }, LLM.HELPS[k].q))),
-      el('div.line.more', {},
-        a.state !== 'left' && el('button', { title: 'Leave this decision to the chat that asked', on: { click: () => settle(id, { state: 'left', answer: '', why: '', from: '' }) } }, 'Your call'),
-        a.state !== 'open' && el('button', { title: 'Back to not answered', on: { click: () => settle(id, { state: 'open', answer: '', why: '', from: '' }) } }, 'Clear'),
-        th && el('button', { on: { click: () => { closePop(); showThread(th); } } }, 'Open the thread'),
-        mark && el('button', { on: { click: () => { closePop(); mark.scrollIntoView({ block: 'center' }); } } }, 'Show in the text')));
+      el('div.sec', {},
+        el('div.lab', {}, el('span', {}, 'Your answer'),
+          // Not where the menu stands on the question itself.
+          mark && !atMark && el('button', { on: { click: () => { closePop(); mark.scrollIntoView({ block: 'center' }); } } }, 'Show in the text')),
+        el('div.line', {}, box, el('button.primary', { on: { click: keep } }, 'Save')),
+        el('div.line', {}, why),
+        el('div.line.more', {},
+          a.state !== 'left' && el('button', { title: 'Leave this decision to the chat that asked', on: { click: () => settle(id, { state: 'left', answer: '', why: '', from: '' }) } }, 'Leave it to the asker'),
+          a.state !== 'open' && el('button', { title: 'Back to not answered', on: { click: () => settle(id, { state: 'open', answer: '', why: '', from: '' }) } }, 'Clear'))),
+      el('div.sec', {},
+        el('div.lab', {}, el('span', {}, 'Get help')),
+        // A question that has a thread is helped there: the menu leads to
+        // it and asks nothing new, as a passage with a thread opens it.
+        th ? el('div.line.helps', {}, el('button', { on: { click: () => { closePop(); showThread(th); } } }, 'Open the thread'))
+          : el('div.line.helps', {},
+            el('button', { disabled: off, title: off ? 'Open this page inside Claude to get help with a question.' : null, on: { click: () => helpWith(id, 'help') } }, LLM.HELPS.help.q),
+            more)));
     place(pop, rect, false);
     if (!matchMedia('(hover: none)').matches) { box.focus({ preventScroll: true }); box.select(); }
   }
@@ -2334,24 +2353,35 @@
     render();
   }
 
-  // One of the helps with a question. It starts the question's thread, or
-  // is the next turn in it: a question has one thread, as a passage has.
+  // One of the helps with a question, asked with a button.
   function helpWith(id, kind) {
+    const a = askById(id);
+    if (a) inAskThread(id, { q: LLM.HELPS[kind].q, help: kind, prompt: LLM.helpPrompt(a.q, kind) }, false);
+  }
+
+  // The reader's own question about a question they were asked.
+  function askAbout(id, text) {
+    const a = askById(id), said = text.trim();
+    if (a && said) inAskThread(id, { q: said, prompt: LLM.askedPrompt(a.q, said) }, true);
+  }
+
+  // A turn about a question. It starts the question's thread, or is the
+  // next turn in it: a question has one thread, as a passage has.
+  function inAskThread(id, props, typed) {
     const sh = sheetNow(), a = askById(id);
     if (!a || offline()) return;
     closePop();
     let th = askThread(id), focusId = null;
-    const props = { q: LLM.HELPS[kind].q, help: kind, prompt: LLM.helpPrompt(a.q, kind) };
     if (!th) {
       th = newNode({
-        parent: sh.node, ...props, ready: false, ...looksFor(sh.node, false),
+        parent: sh.node, ...props, ready: false, ...looksFor(sh.node, typed),
         anchor: { start: a.start == null ? FAR : a.start, end: a.end == null ? FAR : a.end, text: a.q, ask: id },
       });
       runNode(th.id);
     } else {
       const end = N(tipOf(th.id));
       if (busy(end)) { toast('That thread is still being answered. Ask again in a moment.'); return; }
-      const m = newNode({ parent: end.id, ...props, ...looksFor(end.id, false) });
+      const m = newNode({ parent: end.id, ...props, ...looksFor(end.id, typed) });
       state.tips[th.id] = m.id;
       focusId = m.id;
       if (th.status === 'resolved') th.status = 'open';
@@ -2656,7 +2686,7 @@
     const g = t.closest('.gloss');
     if (g) { showGloss(g, true); return; }
     const aq = t.closest('.askq');
-    if (aq) { openAskPop(aq.dataset.ask, aq.getBoundingClientRect()); return; }
+    if (aq) { openAskPop(aq.dataset.ask, aq.getBoundingClientRect(), true); return; }
     const m = t.closest('mark[data-node]');
     if (m) { openBeside(colIndex(c), m.dataset.node); render(); return; }
     const s = t.closest('.sent');

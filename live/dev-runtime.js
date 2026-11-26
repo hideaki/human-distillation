@@ -85,7 +85,7 @@
       const said = {
         why: 'Placeholder reason. A real answer would say what depends on your answer, and that it is inferring this from what was sent here.',
         pick: 'Placeholder choice. A real answer would name the choices it sees and the one it would take.',
-        help: 'Placeholder help. A real answer would now ask you one easy question about your own situation. What do you use it for?',
+        help: 'Placeholder help. A real answer would say what depends on your answer and what choices it sees, and then ask you one easy question about your own situation. What do you use it for?',
         typed: `Placeholder reply in the thread of a question. The stand-in was shown ${settled} settled ${settled === 1 ? 'answer' : 'answers'} on the sheet.`,
       }[kind];
       const out = [said, '', '@@@'];

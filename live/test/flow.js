@@ -409,11 +409,11 @@
     key($('#pop-q'), 'Enter');
     await until(() => !pop() && entry(i).answer === text, `the answer to question ${i} to be kept`);
   }
-  // Ask for one of the helps from the menu of question i.
-  async function helpFrom(i, label) {
+  // Ask for help from the menu of question i: its one button.
+  async function helpFrom(i) {
     await click(qmark(i), `question ${i}`);
     const before = ids();
-    await click(button(await askMenu(), label), `"${label}"`);
+    await click(button(await askMenu(), 'Help me answer'), '"Help me answer"');
     const id = await fresh(before, 'the help to be asked');
     await answered(id);
     return id;
@@ -450,11 +450,11 @@
     },
     question: {
       label: 'Question thread', box: 'Ask more about this question…', about: Q[0], sent: true,
-      open: () => helpFrom(1, 'Why do you ask?'),
+      open: () => helpFrom(1),
       mark: () => qmark(1),
-      dq: 'Why do you ask?', reply: 'Placeholder reason.', typed: 'Placeholder reply in the thread of a question.',
-      chips: ['What would you pick?', 'Help me answer', 'What would change your mind?', 'Show this as a diagram'],
-      oneClick: { label: 'Help me answer', help: 'help', asks: 'Help me answer it. Ask me one easy question at a time', reply: 'Placeholder help.' },
+      dq: 'Help me answer', reply: 'Placeholder help.', typed: 'Placeholder reply in the thread of a question.',
+      chips: ['Why do you ask?', 'What would you pick?', 'What would change your mind?', 'Show this as a diagram'],
+      oneClick: { label: 'Why do you ask?', help: 'why', asks: 'Why do you ask? Say what depends on my answer', reply: 'Placeholder reason.' },
       next: 'What would change your mind?',
       head: `“${Q[0]}”`, above: 'Does the file need to open in a spreadsheet?',
       reopen: async () => { await click(qmark(1), 'the question'); await click(button(await askMenu(), 'Open the thread'), '"Open the thread"'); },
@@ -1767,12 +1767,15 @@
     tidy('A sent answer without questions');
   });
 
-  test('Questions', 'the menu of a question: an answer, a reason, "Your call" and "Clear", kept through a reload', async () => {
+  test('Questions', 'the menu of a question, in two parts: an answer, a reason, leaving it to the asker and "Clear", kept through a reload', async () => {
     await sentWithQuestions();
     await click(qmark(1), 'the first question');
     const m = await askMenu();
     eq(txt($('.q', m)), Q[0], 'The menu says the question so that it stands alone');
-    same($$('button', m).map(txt), ['Save', 'Why do you ask?', 'What would you pick?', 'Help me answer', 'Your call', 'Show in the text'], 'What it offers');
+    same($$('.sec .lab > span', m).map(txt), ['Your answer', 'Get help'], 'Its two parts');
+    // On the question itself it does not offer to show the question.
+    same($$('button', m).map(txt), ['Save', 'Leave it to the asker', 'Help me answer'], 'What it offers');
+    same($$('input', m).map(i => i.placeholder), ['Type your answer…', 'Your reason, if you want to give one', 'Ask about this question…'], 'Its boxes');
     eq(doc.activeElement, $('#pop-q'), 'The answer box has the focus');
     // Enter with nothing typed keeps nothing.
     key($('#pop-q'), 'Enter');
@@ -1789,12 +1792,12 @@
 
     // Left to the asker, then taken back.
     await click(qmark(2), 'the second question');
-    await click(button(await askMenu(), 'Your call'), '"Your call"');
+    await click(button(await askMenu(), 'Leave it to the asker'), '"Leave it to the asker"');
     await until(() => entry(2).state === 'left', 'the question to be left to the asker');
     ok(qmark(2).classList.contains('left'), 'The mark shows it');
     eq(stripLine(), '▸ 4 questions for you, 2 settled', 'The strip');
     await click(qmark(2), 'the second question');
-    same($$('.more button', await askMenu()).map(txt), ['Clear', 'Show in the text'], 'A question that was left offers "Clear", not "Your call"');
+    same($$('.more button', await askMenu()).map(txt), ['Clear'], 'A question that was left offers "Clear", and no longer to leave it');
     await click(button(pop(), 'Clear'), '"Clear"');
     await until(() => entry(2).state === 'open' && qmark(2).classList.contains('open'), 'the question to be open again');
 
@@ -1813,6 +1816,11 @@
     await until(() => qrows().length === 4, 'the rows');
     same(qrows()[0], ['1.', Q[0], 'Yes, in ExcelThe finance team edits it there.'], 'The row of an answered question');
     ok(!qmark(4), 'The fourth question has no mark');
+    // From a row the menu can show where the question stands, when it stands somewhere.
+    await click($('.qrow[data-ask="q3"]', strip()), 'the row of the third question');
+    same([txt($('.q', await askMenu())), !!button(pop(), 'Show in the text')], [Q[2], true], 'The menu of a row');
+    key(doc.body, 'Escape');
+    await until(() => !pop(), 'the menu to close');
     await click($('.qrow[data-ask="q4"]', strip()), 'the row of the fourth question');
     same([txt($('.q', await askMenu())), !!button(pop(), 'Show in the text')], [Q[3], false], 'Its menu');
     type($('#pop-q'), 'Twelve');
@@ -1838,11 +1846,11 @@
   test('Questions', 'a help opens the thread of the question, the sheet travels with every question, and a proposed answer can be used', async () => {
     await sentWithQuestions();
     await answerIn(1, 'Yes');
-    const th = await helpFrom(2, 'Why do you ask?');
+    const th = await helpFrom(2);
     await until(() => pane(th), 'the thread to open beside the answer');
-    same([node(th).parent, node(th).q, node(th).help, node(th).anchor.ask, node(th).anchor.text], ['root', 'Why do you ask?', 'why', 'q2', Q[1]], 'The thread');
+    same([node(th).parent, node(th).q, node(th).help, node(th).anchor.ask, node(th).anchor.text], ['root', 'Help me answer', 'help', 'q2', Q[1]], 'The thread');
     same([node(th).anchor.start, node(th).anchor.end], [entry(2).start, entry(2).end], 'It hangs where the question stands');
-    eq(node(th).prompt, `About this question you asked me: "${Q[1]}"\n\nWhy do you ask? Say what depends on my answer, and what you would do differently for each likely answer. Where you are inferring this from what was sent here, say so.\n\n(The app worded this request. Answer in the language of the answer it is about, not in the language of this request.)`, 'What is asked');
+    eq(node(th).prompt, `About this question you asked me: "${Q[1]}"\n\nHelp me answer it. First say in a sentence or two what depends on my answer and what choices you see. Where you are inferring this from what was sent here, say so. Then ask me one easy question about my own situation, in words I would use. Go on one question at a time, and propose an answer once you can.\n\n(The app worded this request. Answer in the language of the answer it is about, not in the language of this request.)`, 'What is asked');
     eq(txt($('header .from', pane(th))), `“${Q[1]}”`, 'The heading of the thread');
     eq($('.composer .msg', pane(th)).placeholder, 'Ask more about this question…', 'Its message box');
     // The sheet goes with the question, as it stands now, and is not kept in the turn.
@@ -1850,11 +1858,11 @@
     eq(call.prompt, node(th).prompt + `\n\n${NOTE_HEAD}\n1. ${Q[0]}\n   My answer: Yes\n2. ${Q[1]}\n   Not answered yet.\n3. ${Q[2]}\n   Not answered yet.\n4. ${Q[3]}\n   Not answered yet.\nThis thread is about question 2.)`, 'The turn sent');
     lacks(node(th).prompt, 'The app added this note', 'The turn as kept');
     has(call.turns[0].content, OFFER_RULE, 'The instructions say when to propose an answer');
-    has(txt(answerText(th)), 'Placeholder reason.', 'The reply');
+    has(txt(answerText(th)), 'Placeholder help.', 'The reply');
     ok(!$('.offer', pane(th)), 'A reply that only explains proposes nothing');
     // The question shows that its thread is open; the thread draws no mark of its own.
     ok(qmark(2).classList.contains('active') && !$('mark[data-node]', mainText()), 'The marks');
-    same(chipLabels(th), ['What would you pick?', 'Help me answer', 'What would change your mind?', 'Show this as a diagram'], 'The chips: the helps not asked yet come first');
+    same(chipLabels(th), ['Why do you ask?', 'What would you pick?', 'What would change your mind?', 'Show this as a diagram'], 'The chips: the helps the menu does not offer come first');
 
     // "What would you pick?" comes with a proposal, and the button takes it.
     const had = ids();
@@ -1896,15 +1904,24 @@
     eq(entry(2).from, '', 'It no longer comes from the proposal');
     eq($$('.offer.on', pane(th)).length, 0, 'No proposal says it is on the sheet');
 
-    // The menu leads back to the thread, and a second help continues it.
+    // A question that has a thread is helped there: its menu leads to the
+    // thread and asks nothing new. A second help continues the thread.
     await click($('header .icon', pane(th)), 'the × of the thread');
     await until(() => !pane(th), 'the thread to close');
     await click(qmark(2), 'the second question');
+    same([$$('.helps button', await askMenu()).map(txt), !!$('#pop-ask')], [['Open the thread'], false], 'The help its menu offers now');
+    // A scroll closes the menu, and a page that is not on screen hears of
+    // the scroll that closing the thread made only now.
+    await sleep(200);
+    if (!pop()) await click(qmark(2), 'the second question again');
     await click(button(await askMenu(), 'Open the thread'), '"Open the thread"');
     await until(() => pane(th), 'the thread to open again');
     const leaf = lastCol().leaf;
-    const help = await helpFrom(2, 'Help me answer');
-    same([node(help).parent, node(help).help, lastStart()], [leaf, 'help', th], 'A second help is the next turn of the same thread');
+    const sofar = ids();
+    await click(chip(th, 'Why do you ask?'), 'the chip "Why do you ask?"');
+    const help = await fresh(sofar, 'the second help');
+    await answered(help);
+    same([node(help).parent, node(help).help, lastStart()], [leaf, 'why', th], 'A second help is the next turn of the same thread');
     eq(Object.values(conv().nodes).filter(n => n.anchor && n.anchor.ask === 'q2').length, 1, 'Threads on the second question');
 
     // An ordinary side question in the same conversation knows the answers too, and proposes none.
@@ -1916,6 +1933,43 @@
     lacks(lastCall().prompt, 'This thread is about question', 'It is about no question');
     lacks(lastCall().turns[0].content, OFFER_RULE, 'It is not asked to propose');
     same([node(side).anchor.ask || null, !!$(`mark[data-node="${side}"]`, mainText())], [null, true], 'An ordinary thread, with its mark');
+  });
+
+  test('Questions', 'a question typed in the menu starts the thread in the reader\'s own words, and Enter in the empty box asks for help', async () => {
+    await sentWithQuestions();
+    await click(qmark(3), 'the third question');
+    await askMenu();
+    let before = ids();
+    type($('#pop-ask'), 'Does UTC confuse the finance team?');
+    key($('#pop-ask'), 'Enter');
+    const th = await fresh(before, 'the question to be asked');
+    await answered(th);
+    await until(() => pane(th) && !pop(), 'the thread to open beside the answer');
+    same([node(th).parent, node(th).q, node(th).help || null, node(th).anchor.ask, node(th).anchor.text], ['root', 'Does UTC confuse the finance team?', null, 'q3', Q[2]], 'The thread');
+    // The reader's own words, so not marked as worded by the app.
+    eq(node(th).prompt, `About this question you asked me: "${Q[2]}"\n\nDoes UTC confuse the finance team?`, 'What is asked');
+    has(lastCall().prompt, 'This thread is about question 3.', 'The turn sent');
+    has(txt(answerText(th)), 'Placeholder reply in the thread of a question.', 'The reply');
+    same(chipLabels(th).slice(0, 3), ['Why do you ask?', 'What would you pick?', 'Help me answer'], 'The chips: every help is still to be asked');
+    eq(entry(3).state, 'open', 'Asking answers nothing');
+
+    // Enter in the empty box does what the button does, as in the menu of a passage.
+    await click(qmark(1), 'the first question');
+    await askMenu();
+    before = ids();
+    $('#pop-ask').focus();
+    key($('#pop-ask'), 'Enter');
+    const help = await fresh(before, 'the help to be asked');
+    await answered(help);
+    same([node(help).q, node(help).help, node(help).anchor.ask], ['Help me answer', 'help', 'q1'], 'The thread it starts');
+    // Enter in the answer box is still for the answer.
+    await click(qmark(2), 'the second question');
+    await askMenu();
+    before = ids();
+    type($('#pop-q'), 'No');
+    key($('#pop-q'), 'Enter');
+    await until(() => entry(2).answer === 'No', 'the answer to be kept');
+    eq(ids().length, before.length, 'No thread was started');
   });
 
   test('Questions', '"Check them together" reads all the answers in a thread of its own, and checking again continues it', async () => {
@@ -1956,7 +2010,7 @@
 
     // After a change the strip says so, and checking again is the next turn of the same thread.
     await click(qmark(2), 'the second question');
-    await click(button(await askMenu(), 'Your call'), '"Your call"');
+    await click(button(await askMenu(), 'Leave it to the asker'), '"Leave it to the asker"');
     await until(() => stripNote() === 'not checked since your last change', 'the note on the strip');
     ok(chipLabels(th).includes('Check again'), 'The thread offers to check again');
     before = ids();
@@ -1988,7 +2042,7 @@
 
     await answerIn(1, 'Yes, in Excel', 'The finance team edits it there.');
     await click(qmark(2), 'the second question');
-    await click(button(await askMenu(), 'Your call'), '"Your call"');
+    await click(button(await askMenu(), 'Leave it to the asker'), '"Leave it to the asker"');
     await until(() => entry(2).state === 'left', 'the question to be left to the asker');
     await click(copy(), '"Copy reply"');
     eq(await until(() => grab.text, 'the reply'), [

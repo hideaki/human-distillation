@@ -248,13 +248,17 @@ needs from you before it goes on. Sent to the page, such an answer arrives
 with its questions marked, and you can settle them one at a time.
 
 - **The marks.** Each question is highlighted where it stands in the text.
-  A click opens its menu: a box for your answer and one for your reason,
-  three helps, and "Your call", which leaves the decision to the chat that
-  asked.
-- **The helps.** "Why do you ask?", "What would you pick?" and "Help me
-  answer" open a side thread on that one question. Claude in the page did
-  not ask the question. What it says about it is inferred from what was
-  sent, and it is asked to say so.
+  A click opens its menu, which has two parts. "Your answer" has a box for
+  the answer and one for your reason, and "Leave it to the asker", which
+  hands the decision back to the chat that asked. "Get help" has one
+  button, "Help me answer", and a box for a question of your own.
+- **The help.** Either one opens a side thread on that one question.
+  "Help me answer" says what depends on your answer and what the choices
+  are, then asks you one easy question at a time. In the thread, "Why do
+  you ask?" and "What would you pick?" are one click each. Once a question
+  has a thread, its menu leads to the thread instead. Claude in the page
+  did not ask the question. What it says about it is inferred from what
+  was sent, and it is asked to say so.
 - **A proposed answer.** When a reply in that thread arrives at an answer,
   it ends with the answer, a short reason and "Use as my answer". Nothing
   joins your answers until you press that or type your own.

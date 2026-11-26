@@ -154,7 +154,12 @@ uses the user's existing connections with no sign-in of its own.
   places each quote in the drawn text, by its letters and digits where the
   markup differs. Only the reader's actions write to the sheet (`settle`).
   The three helps (`LLM.HELPS`) and "Check them together" (`LLM.CHECK`) are
-  worded by the page and end with `WORDED`. Every question of the
+  worded by the page and end with `WORDED`. The menu of a question
+  (`openAskPop`) offers one of them, "Help me answer", and a box for the
+  reader's own question (`LLM.askedPrompt`, not marked); the other two are
+  chips in the question's thread. A question that has a thread gets no new
+  one from its menu, only "Open the thread", as a passage with a thread
+  opens it. Every question of the
   conversation is sent with `LLM.sheetNote`, added to the turn being asked
   in `turnsFor` and never kept in a turn's `prompt`, so a thread always goes
   by the answers as they stand. In a question's thread `rules()` allows a

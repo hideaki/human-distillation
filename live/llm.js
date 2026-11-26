@@ -66,9 +66,13 @@ const LLM = (() => {
   const HELPS = {
     why: { q: 'Why do you ask?', ask: 'Why do you ask? Say what depends on my answer, and what you would do differently for each likely answer. Where you are inferring this from what was sent here, say so.' },
     pick: { q: 'What would you pick?', ask: 'What would you pick? Name the choices you see, the one you would take with what you know now, and what would change your mind.' },
-    help: { q: 'Help me answer', ask: 'Help me answer it. Ask me one easy question at a time about my own situation, in words I would use, and propose an answer once you can.' },
+    // The one help the question's menu offers, so it also says what the
+    // other two would have: what hangs on the answer, and the choices.
+    help: { q: 'Help me answer', ask: 'Help me answer it. First say in a sentence or two what depends on my answer and what choices you see. Where you are inferring this from what was sent here, say so. Then ask me one easy question about my own situation, in words I would use. Go on one question at a time, and propose an answer once you can.' },
   };
   const helpPrompt = (question, kind) => `About this question you asked me: "${question}"\n\n${HELPS[kind].ask}${WORDED}`;
+  // The reader's own words about a question they were asked: not marked.
+  const askedPrompt = (question, typed) => `About this question you asked me: "${question}"\n\n${typed}`;
   // The answers read together, before they go back to the chat that asked.
   const CHECK = 'Check my answers together before I send them back. Name any that conflict with each other, by their numbers, and say in a sentence what the conflict is. Name any that cannot be understood without the thread where I worked it out. Do not reopen an answer for any other reason. If they fit together, say so in one sentence. No diagram.' + WORDED;
   const CHECK_AGAIN = 'I have changed my answers. Check them together again in the same way, and say which of the points you raised before are now settled.' + WORDED;
@@ -951,7 +955,7 @@ const LLM = (() => {
     ask, side, parse, partSpan,
     inbox, discard, fromInbox, summaryIn,
     passagePrompt, askPrompt, partPrompt, formulaPrompt, symbolPrompt, termPrompt, followPrompt, backPrompt, DRAW, WORDED,
-    HELPS, helpPrompt, CHECK, CHECK_AGAIN, sheetNote, replyText,
+    HELPS, helpPrompt, askedPrompt, CHECK, CHECK_AGAIN, sheetNote, replyText,
     errorText, isFinal: code => FINAL.has(code),
   };
 })();

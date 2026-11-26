@@ -156,6 +156,10 @@ test('the helps and the check are worded by the app, and say so', () => {
     assert.ok(p.endsWith(LLM.WORDED), kind);
   }
   assert.ok(LLM.HELPS.why.ask.includes('Where you are inferring this from what was sent here, say so.'));
+  // The one help the menu offers says what the other two would, before it asks.
+  assert.ok(LLM.HELPS.help.ask.startsWith('Help me answer it. First say in a sentence or two what depends on my answer and what choices you see. Where you are inferring this from what was sent here, say so. Then ask me one easy question'));
+  // A question the reader typed about it is their own words: not marked.
+  assert.equal(LLM.askedPrompt('Who will read it?', 'Does it matter?'), 'About this question you asked me: "Who will read it?"\n\nDoes it matter?');
   assert.deepEqual(Object.values(LLM.HELPS).map(h => h.q), ['Why do you ask?', 'What would you pick?', 'Help me answer']);
   assert.ok(LLM.CHECK.startsWith('Check my answers together') && LLM.CHECK.endsWith(LLM.WORDED));
   assert.ok(LLM.CHECK_AGAIN.startsWith('I have changed my answers.') && LLM.CHECK_AGAIN.endsWith(LLM.WORDED));

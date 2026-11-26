@@ -2056,6 +2056,79 @@
     eq(ids().length, before.length, 'No thread was started');
   });
 
+  test('Questions', 'the thread of a question opens with the question, word for word, and its words are asked about like any other text', async () => {
+    await sentWithQuestions();
+    const lead = id => $('.lead', answerText(id));
+    // It is there before the reply is: the page puts it, Claude does not.
+    await click(qmark(3), 'the third question');
+    await askMenu();
+    let before = ids();
+    type($('#pop-ask'), 'Take your time #slow');
+    key($('#pop-ask'), 'Enter');
+    const th = await fresh(before, 'the question to be asked');
+    await until(() => pane(th) && lead(th), 'the question at the top of its thread');
+    ok(node(th).phase !== 'done', 'The reply is still to come');
+    await answered(th);
+    same([node(th).lead, txt(lead(th))], [Q[2], Q[2]], 'The question, word for word');
+    ok(txt(answerText(th)).startsWith(Q[2] + 'Placeholder reply in the thread of a question.'), 'The reply comes after it');
+    lacks(node(th).raw, Q[2], 'The reply as it is kept');
+
+    // Words of the question, pointed at like any other: the thread hangs
+    // from them, and Claude is told they are the question's and not its own.
+    const o = await drag(() => answerText(th), 'UTC or in local time');
+    await menu();
+    before = ids();
+    type($('#pop-q'), 'Which is usual?');
+    key($('#pop-q'), 'Enter');
+    const side = await fresh(before);
+    await until(() => pane(side), 'the thread beside it');
+    await answered(side);
+    same([node(side).parent, node(side).anchor.text, node(side).anchor.start, node(side).anchor.end, node(side).anchor.lead],
+      [th, 'UTC or in local time', o.start, o.end, true], 'The thread');
+    ok(o.end <= Q[2].length, 'Its place is inside the question');
+    eq(node(side).prompt, 'About this part of the question you asked me:\n"UTC or in local time"\n\nWhich is usual?', 'What is asked');
+    eq($$(`mark[data-node="${side}"]`, lead(th)).map(txt).join(''), 'UTC or in local time', 'The marked words');
+    // The question is not sent as part of the reply it stands above.
+    const sent = lastCall().turns.filter(x => x.role === 'assistant').map(x => x.content);
+    lacks(sent[sent.length - 1], Q[2], 'The reply as Claude is sent it');
+    has(lastCall().prompt, 'This thread is about question 3.', 'The turn sent');
+
+    // A sentence of the question with one click, and a term in it.
+    await click($(`.pane[data-start="${side}"] header .icon`), 'the × of the thread');
+    await click(sentence(lead(th), 'Should the timestamps'), 'the sentence of the question');
+    const whole = await explain();
+    same([node(whole).anchor.lead, node(whole).anchor.text], [true, Q[2]], 'The thread on the whole sentence');
+    has(node(whole).prompt, `About this part of the question you asked me:\n"${Q[2]}"\n\nExplain this part further.`, 'What is asked');
+    await click($(`.pane[data-start="${whole}"] header .icon`), 'the × of the thread');
+
+    // A passage of the reply is still a part of the answer.
+    await click(sentence(answerText(th), 'Placeholder reply'), 'a sentence of the reply');
+    const part = await explain();
+    same([node(part).anchor.lead || false, node(part).anchor.start >= Q[2].length], [false, true], 'The thread on the reply');
+    has(node(part).prompt, 'About this part of your answer:\n"Placeholder reply', 'What is asked');
+    await click($(`.pane[data-start="${part}"] header .icon`), 'the × of the thread');
+
+    // Only the first reply of the thread has it.
+    before = ids();
+    await click(chip(th, 'Why do you ask?'), 'the chip "Why do you ask?"');
+    const next = await fresh(before, 'the second turn');
+    await answered(next);
+    same([node(next).lead || null, !!lead(next)], [null, false], 'The second reply');
+
+    // The write-up shows the question too, with its side threads under it.
+    await click($('#writeup'), '"Write it up"');
+    const sheet = await until(() => $('#modal.show .sheet'), 'the write-up');
+    eq(txt($('.lead', sheet)), Q[2], 'The question in the write-up');
+    ok($('.lead', sheet).parentElement.nextElementSibling.classList.contains('dbranch'), 'A thread on its words stands under it');
+    await click(button(sheet, 'Close'), '"Close"');
+
+    // Kept through a reload.
+    await load({ keep: true });
+    await until(() => pane(th) && lead(th), 'the thread after a reload');
+    eq(txt(lead(th)), Q[2], 'The question after a reload');
+    eq($$('mark', lead(th)).length > 0, true, 'Its marks after a reload');
+  });
+
   test('Questions', 'a decision the answer only points to: listed with no quote, shortened in its row and in the reply, whole in its menu and for Claude', async () => {
     // Worded with its options and the recommendation, so it is long.
     const LONG = 'How long should the exported files be kept? The options in the plan were three months, a year, or for good. I recommended a year. '
@@ -2102,6 +2175,8 @@
     same([node(th).anchor.ask, node(th).anchor.text, node(th).anchor.start >= 1e9], ['q2', LONG, true], 'The thread');
     has(node(th).prompt, `About this question you asked me: "${LONG}"`, 'What is asked');
     has(lastCall().prompt, `2. ${LONG}\n   Not answered yet.`, 'The note sent with it');
+    // Its thread opens with it whole, where the heading shows three lines.
+    eq(txt($('.lead', answerText(th))), LONG, 'The question at the top of its thread');
 
     // The reply has the start of it: the chat that asked knows the rest.
     await click(row(), 'the row of the long question');
@@ -2112,6 +2187,13 @@
     const grab = clipboard();
     await click(button(strip(), 'Copy reply'), '"Copy reply"');
     eq(await until(() => grab.text, 'the reply'), `2. ${LONG.slice(0, 199).trimEnd()}…\n   A year\n\nNot answered yet:\n1. ${SHORT}\n`, 'The reply');
+    // The Markdown write-up has it whole, under the line that cuts it.
+    await click($('#writeup'), '"Write it up"');
+    const sheet = await until(() => $('#modal.show .sheet'), 'the write-up');
+    grab.text = null;
+    await click(button(sheet, 'Copy as Markdown'), '"Copy as Markdown"');
+    has(await until(() => grab.text, 'the Markdown'), `**Help me answer**\n>\n> The question, as it was sent: ${LONG}\n>\n> Placeholder help.`, 'The Markdown of its thread');
+    await click(button(sheet, 'Close'), '"Close"');
     tidy('A question the answer only points to');
     noSideways('A question the answer only points to');
   });

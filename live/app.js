@@ -1264,18 +1264,20 @@
             : p.math ? { start: p.start, end: p.end, text: p.text, math: true } : { start: p.start, end: p.end, text: p.text },
         q: typed || (term ? `What does “${term}” mean here?` : VERBS.explain.q),
         verb: typed ? null : 'explain',
-        prompt: p.part ? LLM.partPrompt(p.text, typed) : p.sym ? LLM.symbolPrompt(p.sym, p.text, typed) : p.math ? LLM.formulaPrompt(p.text, typed)
-          : typed ? LLM.askPrompt(p.text, typed) : term ? LLM.termPrompt(term) : LLM.passagePrompt(p.text, 'explain'),
+        prompt: p.part ? LLM.partPrompt(p.text, typed) : p.sym ? LLM.symbolPrompt(p.sym, p.text, typed, p.lead) : p.math ? LLM.formulaPrompt(p.text, typed, p.lead)
+          : typed ? LLM.askPrompt(p.text, typed, p.lead) : term ? LLM.termPrompt(term, p.lead) : LLM.passagePrompt(p.text, 'explain', p.lead),
         status: later ? 'queued' : 'open',
         ready: false,
         ...looksFor(p.nodeId, typed),
       });
+      // Words of the question a thread opens with, not of Claude's reply.
+      if (p.lead) n.anchor.lead = true;
       runNode(n.id);
     } else if (typed) {
       // The passage already has a thread: the question continues it.
       const end = N(tipOf(n.id));
       if (busy(end)) { toast('That thread is still being answered. Ask again in a moment.'); return; }
-      const m = newNode({ parent: end.id, q: typed, ...looks(), prompt: n.anchor.part ? LLM.partPrompt(n.anchor.text, typed) : n.anchor.sym ? LLM.symbolPrompt(n.anchor.sym, n.anchor.text, typed) : n.anchor.math ? LLM.formulaPrompt(n.anchor.text, typed) : LLM.askPrompt(n.anchor.text, typed) });
+      const m = newNode({ parent: end.id, q: typed, ...looks(), prompt: n.anchor.part ? LLM.partPrompt(n.anchor.text, typed) : n.anchor.sym ? LLM.symbolPrompt(n.anchor.sym, n.anchor.text, typed, n.anchor.lead) : n.anchor.math ? LLM.formulaPrompt(n.anchor.text, typed, n.anchor.lead) : LLM.askPrompt(n.anchor.text, typed, n.anchor.lead) });
       state.tips[n.id] = m.id;
       focusId = m.id;
       if (n.status === 'resolved') n.status = 'open';
@@ -1784,7 +1786,8 @@
     const working = busy(n);
 
     if (working && job && job.sources.length) ai.append(...sources(job.sources));
-    if (n.raw) ai.append(buildText(n));
+    // The question a thread opens with is there before the reply is.
+    if (n.raw || n.lead) ai.append(buildText(n));
     if (working) {
       ai.append(el('div.working', { role: 'status' },
         el('span.dots', { 'aria-hidden': 'true' }, el('i'), el('i'), el('i')),
@@ -1900,8 +1903,18 @@
 
   // An answer's text, with its glossed terms and the passages that have threads.
   function buildText(n, plain) {
-    const parsed = LLM.parse(n.raw);
+    const parsed = LLM.parse(n.raw || '');
     const t = el('div.text');
+    // The first reply in a question's thread opens with the question, whole
+    // and word for word, so that it can be pointed at like any other text.
+    // The page puts it there: Claude here did not write it, and it is not
+    // sent as part of the reply. It is the first block, so its characters
+    // come first in the offsets, in the write-up as well.
+    if (n.lead) {
+      const q = el('div.lead');
+      renderBlocks(q, n.lead, !plain, false);
+      t.append(q);
+    }
     renderBlocks(t, parsed.text, !plain, busy(n));
     if (plain) { t.classList.add('static'); return t; }
     t.dataset.node = n.id;
@@ -2204,6 +2217,9 @@
     hideGloss();
     const p = { ci: colIndex(c), nodeId: c.dataset.node, start, end, text: c.textContent.slice(start, end), math: !!formula };
     if (sym) p.sym = sym.getAttribute('data-tex');
+    // In the question a thread opens with: Claude is told so.
+    const q = $(':scope > .lead', c);
+    if (q && end <= q.textContent.length) p.lead = true;
     // A formula that already has a thread opens it, as a highlighted passage does.
     const existing = (formula || offline()) && findExisting(p);
     if (existing) { openBeside(p.ci, existing.id); render(); return; }
@@ -2384,7 +2400,7 @@
     let th = askThread(id), focusId = null;
     if (!th) {
       th = newNode({
-        parent: sh.node, ...props, ready: false, ...looksFor(sh.node, typed),
+        parent: sh.node, ...props, lead: a.q, ready: false, ...looksFor(sh.node, typed),
         anchor: { start: a.start == null ? FAR : a.start, end: a.end == null ? FAR : a.end, text: a.q, ask: id },
       });
       runNode(th.id);
@@ -2633,6 +2649,8 @@
     if (n.parent) {
       out.push(pad + (n.anchor ? `On “${clip(about(n.anchor), 160)}”: ` : '') + (n.back ? '**My explanation:** ' + n.q.replace(/\s+/g, ' ') : '**' + n.q.replace(/\s+/g, ' ') + '**'), pad.trimEnd());
     }
+    // The question a thread opens with, where the line above had to cut it.
+    if (n.lead && n.lead.length > 160) out.push(pad + 'The question, as it was sent: ' + n.lead.replace(/\s+/g, ' '), pad.trimEnd());
     if (n.raw) LLM.parse(n.raw).text.replace(/```graph\n([\s\S]*?)```/g, (m, spec) => toMermaid(spec)).split('\n').forEach(l => out.push((pad + l).trimEnd()));
     out.push('');
     anchoredKids(id).filter(k => k.raw).forEach(k => out.push(...outline(k.id, depth + 1)));

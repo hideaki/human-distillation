@@ -167,7 +167,14 @@ uses the user's existing connections with no sign-in of its own.
   reader's own question (`LLM.askedPrompt`, not marked); the other two are
   chips in the question's thread. A question that has a thread gets no new
   one from its menu, only "Open the thread", as a passage with a thread
-  opens it. Every question of the
+  opens it. The first turn of a question's thread keeps the question in
+  `lead`, and `buildText` draws it as the first block of that reply
+  (`.lead`), before Claude has written anything, so its words are pointed
+  at like any other text. It counts in the reply's offsets, also in the
+  write-up, but is not in `raw` and is not sent as part of the reply. A
+  passage inside it has `lead: true` on its anchor, and its prompt says
+  "the question you asked me" where another says "your answer"
+  (`pointedIn` in `llm.js`). A thread made before this has no `lead`. Every question of the
   conversation is sent with `LLM.sheetNote`, added to the turn being asked
   in `turnsFor` and never kept in a turn's `prompt`, so a thread always goes
   by the answers as they stand. In every thread of such a conversation

@@ -258,7 +258,10 @@ with its questions marked, and you can settle them one at a time.
   "Help me answer" says what depends on your answer and what the choices
   are, then asks you one easy question at a time. In the thread, "Why do
   you ask?" and "What would you pick?" are one click each. Once a question
-  has a thread, its menu leads to the thread instead. Claude in the page
+  has a thread, its menu leads to the thread instead. The thread opens
+  with the question itself, whole and word for word, above the first
+  reply. So its words can be asked about like any other text: click a
+  sentence of it or highlight a few words. Claude in the page
   did not ask the question. What it says about it is inferred from what
   was sent, and it is asked to say so.
 - **A proposed answer.** When a reply arrives at an answer, it ends with

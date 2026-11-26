@@ -41,13 +41,17 @@ const LLM = (() => {
   // question is the person's own words and is not marked.
   const WORDED = '\n\n(The app worded this request. Answer in the language of the answer it is about, not in the language of this request.)';
 
-  const passagePrompt = (text, verb) => `About this part of your answer:\n"${text}"\n\n${VERBS[verb].ask}${WORDED}`;
-  const askPrompt = (text, question) => `About this part of your answer:\n"${text}"\n\n${question}`;
+  // What the reader pointed at is in an answer of Claude's, or (`asked`) in
+  // a question they were asked, which the page shows whole above the first
+  // reply of that question's thread.
+  const pointedIn = asked => (asked ? 'the question you asked me' : 'your answer');
+  const passagePrompt = (text, verb, asked) => `About this part of ${pointedIn(asked)}:\n"${text}"\n\n${VERBS[verb].ask}${WORDED}`;
+  const askPrompt = (text, question, asked) => `About this part of ${pointedIn(asked)}:\n"${text}"\n\n${question}`;
   const partPrompt = (text, question) => `About this part of your diagram: "${text}"\n\n${question || 'Explain this part further: what it is, and how it relates to what it is connected to.' + WORDED}`;
-  const formulaPrompt = (text, question) => `About this formula in your answer: ${text}\n\n${question || 'Explain this formula: what each symbol stands for, and what the formula as a whole says, in plain words. Work through a small example with numbers if that helps.' + WORDED}`;
-  const symbolPrompt = (sym, formula, question) => `About the symbol $${sym}$ in this formula from your answer: ${formula}\n\n${question || 'What does this symbol stand for here, and what does it do in the formula? Answer in a few plain sentences.' + WORDED}`;
+  const formulaPrompt = (text, question, asked) => `About this formula in ${pointedIn(asked)}: ${text}\n\n${question || 'Explain this formula: what each symbol stands for, and what the formula as a whole says, in plain words. Work through a small example with numbers if that helps.' + WORDED}`;
+  const symbolPrompt = (sym, formula, question, asked) => `About the symbol $${sym}$ in this formula from ${pointedIn(asked)}: ${formula}\n\n${question || 'What does this symbol stand for here, and what does it do in the formula? Answer in a few plain sentences.' + WORDED}`;
   const DRAW = 'Show what you just explained as a diagram, with a sentence or two around it.' + WORDED;
-  const termPrompt = term => `About this term in your answer: "${term}"\n\nWhat does it mean here, and why does it matter for this topic?${WORDED}`;
+  const termPrompt = (term, asked) => `About this term in ${pointedIn(asked)}: "${term}"\n\nWhat does it mean here, and why does it matter for this topic?${WORDED}`;
   const followPrompt = (text, verb) => `Still about the part I pointed at ("${clip(text, 200)}"): ${VERBS[verb].ask}${WORDED}`;
   // "Explain it back": the reader's own account of a thread, to be checked.
   const backPrompt = (subject, text) => `I will now explain ${subject} back in my own words, so that you can check my understanding. Compare it with what you told me above. Reply in three short paragraphs, each starting with its label in bold: "**Right:**" for what I have right, "**Off or missing:**" for what is wrong or missing (or "nothing important"), and "**Check yourself:**" for one question that tests my weakest point, which I may answer in my next message. Be specific and brief, with no diagram.\n\nMy explanation:\n${text}`;

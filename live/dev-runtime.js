@@ -27,7 +27,9 @@
 //   ?send=sample      a sample document arrives a moment after the page loads
 //   ?send=questions   one whose answer asks the reader four questions
 //   #offer            in the thread of such a question: the reply proposes an answer
-//                     ("What would you pick?" always does)
+//                     to it ("What would you pick?" always does)
+//   #offer:1,3        in any thread of that conversation: the reply proposes answers
+//                     to questions 1 and 3, each named by its number
 //   ?missing=db       the page was published without the store: no inbox
 //   ?visitor          the viewer is not the owner of this copy: the inbox reads empty
 
@@ -41,7 +43,22 @@
     if (signal) signal.addEventListener('abort', () => { clearTimeout(t); rej({ code: 'cancelled', message: 'stopped' }); }, { once: true });
   });
 
+  // The stand-in's reply, with the answers it was told to propose: the
+  // lines of a proposal go under the separator, like those of a term.
   function reply(turns, notes) {
+    const text = written(turns, notes);
+    const last = turns[turns.length - 1].content;
+    const told = /#offer(?::([\d,]+))?/.exec(last);
+    const lines = [];
+    if (told && told[1]) {
+      told[1].split(',').filter(Boolean).forEach(n => lines.push(`answer ${n}: Placeholder answer to question ${n}`, `why ${n}: The stand-in proposes this for question ${n}.`));
+    } else if (told || (/What would you pick\?/.test(last) && /This thread is about question \d+\./.test(last))) {
+      lines.push('answer: Placeholder answer from the stand-in', 'why: The stand-in proposes this so that the button can be tried.');
+    }
+    return lines.length && text.includes('\n@@@\n') ? text.replace('\n@@@\n', '\n@@@\n' + lines.join('\n') + '\n') : text;
+  }
+
+  function written(turns, notes) {
     const last = turns[turns.length - 1].content;
     const q = last.replace(/\s+/g, ' ').trim();
     const short = q.length > 90 ? q.slice(0, 89) + '…' : q;
@@ -79,8 +96,9 @@
     }
     // A reply in the thread of a question the reader was asked.
     const about = /^About this question you asked me: "(.*?)"\s/.exec(q);
+    const passage = /^About (this (part|term|formula)|the symbol)/.test(q) || /^Still about the part/.test(q);
     const inAskThread = sheet && /This thread is about question \d+\./.test(sheet[0]);
-    if (about || inAskThread) {
+    if (about || (inAskThread && !passage)) {
       const kind = /Why do you ask\?/.test(q) ? 'why' : /What would you pick\?/.test(q) ? 'pick' : /Help me answer it\./.test(q) ? 'help' : 'typed';
       const said = {
         why: 'Placeholder reason. A real answer would say what depends on your answer, and that it is inferring this from what was sent here.',
@@ -88,13 +106,9 @@
         help: 'Placeholder help. A real answer would say what depends on your answer and what choices it sees, and then ask you one easy question about your own situation. What do you use it for?',
         typed: `Placeholder reply in the thread of a question. The stand-in was shown ${settled} settled ${settled === 1 ? 'answer' : 'answers'} on the sheet.`,
       }[kind];
-      const out = [said, '', '@@@'];
-      if (kind === 'pick' || /#offer/.test(q)) out.push('answer: Placeholder answer from the stand-in', 'why: The stand-in proposes this so that the button can be tried.');
-      out.push('next: What would change your mind?');
-      return out.join('\n');
+      return [said, '', '@@@', 'next: What would change your mind?'].join('\n');
     }
 
-    const passage = /^About (this (part|term|formula)|the symbol)/.test(q) || /^Still about the part/.test(q);
     if (/^Show what you just explained as a diagram/.test(q)) {
       return ['Here is the placeholder as a diagram.', '', '```graph', 'A -> B : leads to', 'B -> C', 'A <-> C : compared with', '```', '', '@@@', 'next: What does B do?'].join('\n');
     }

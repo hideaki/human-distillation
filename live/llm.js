@@ -74,7 +74,7 @@ const LLM = (() => {
   // The reader's own words about a question they were asked: not marked.
   const askedPrompt = (question, typed) => `About this question you asked me: "${question}"\n\n${typed}`;
   // The answers read together, before they go back to the chat that asked.
-  const CHECK = 'Check my answers together before I send them back. Name any that conflict with each other, by their numbers, and say in a sentence what the conflict is. Name any that cannot be understood without the thread where I worked it out. Do not reopen an answer for any other reason. If they fit together, say so in one sentence. No diagram.' + WORDED;
+  const CHECK = 'Check my answers together before I send them back. Name any that conflict with each other, by their numbers, and say in a sentence what the conflict is. Name any that cannot be understood without the thread where I worked it out. Do not reopen an answer for any other reason. Where changing one answer would settle a conflict, you may propose that answer. If they fit together, say so in one sentence. No diagram.' + WORDED;
   const CHECK_AGAIN = 'I have changed my answers. Check them together again in the same way, and say which of the points you raised before are now settled.' + WORDED;
 
   const oneLine = (v, n) => clip(String(v || '').replace(/\s+/g, ' ').trim(), n);
@@ -340,8 +340,8 @@ const LLM = (() => {
       `After every answer, however short, add a line containing only ${SEP} and then the lines below. This holds just as much for an answer about a quoted part, a formula, a symbol or a part of a diagram.`,
       `- for each term in your answer that this reader may not know, one line of the form "term: <the term exactly as it appears in your answer> = <a one-sentence plain definition>". At most ${o.level === 2 ? 4 : 6}; none is fine. A term you defined earlier in this conversation keeps its definition in the app, so list only the terms that are new in this answer.${known.length ? ' They already know these, so never list them: ' + known.join(', ') + '.' : ''}`,
       '- up to three lines of the form "next: <a question this person would naturally ask next>", each under twelve words.');
-    if (o.sheet && o.about) {
-      lines.push('- This thread is about one question you asked the reader; the note says which. Most replies here only explain or ask. Propose an answer only when it fits: when they ask what you would pick, or when what they have told you settles it. Then add two more lines: "answer: <the answer, written so that it can be understood without this thread>" and "why: <one or two sentences of reason>". Never more than one proposal in a reply.');
+    if (o.sheet) {
+      lines.push('- You may propose an answer to any question in the note, from any thread. Most replies only explain or ask. Propose only when it fits: when they ask what you would pick, or when what they have told you settles a question or shows that an answer they gave should change. Then add two more lines that carry the number the question has in the note. For question 3 they are "answer 3: <the answer, written so that it can be understood without this thread>" and "why 3: <one or two sentences of reason>". At most one proposal for a question in a reply. Propose for a question other than the one being discussed only when this discussion settled or changed it: never go down the list.');
     }
     lines.push('Write nothing after those lines.');
     return lines.join('\n');
@@ -881,9 +881,12 @@ const LLM = (() => {
   // ---------- reading an answer ----------
 
   // raw -> { text, terms: [{term, gloss}], next: [question] }, and also
-  // offer: { text, why } when the answer proposes an answer to a question
-  // the reader was asked (see "the questions a sent answer asks"). That is
-  // read only under the separator: "Answer: 42" may end any answer.
+  // offers: [{ n, text, why }] when the answer proposes answers to questions
+  // the reader was asked (see "the questions a sent answer asks"). `n` is
+  // the number the question has in the note, or 0 for a proposal that names
+  // none, which is for the question its thread is about. One proposal for a
+  // question: the first. They are read only under the separator, since
+  // "Answer: 42" may end any answer.
   const memo = new Map();
   function parse(raw) {
     raw = String(raw || '');
@@ -905,13 +908,14 @@ const LLM = (() => {
         cut = last && SEP.startsWith(last) ? lines.length - 1 : lines.length;
       }
     }
-    const terms = [], next = [], offer = {};
+    const terms = [], next = [], offers = new Map();
     const sep = cut < lines.length && lines[cut].trim() === SEP;
     tail.forEach(l => {
-      const p = sep && /^\s*[-*]?\s*(answer|why)\s*:\s*(.+?)\s*$/i.exec(l);
+      const p = sep && /^\s*[-*]?\s*(answer|why)(?:\s+(?:(?:to|for)\s+)?(?:question\s+)?#?(\d{1,3}))?\s*:\s*(.+?)\s*$/i.exec(l);
       if (p) {
-        const key = p[1].toLowerCase() === 'why' ? 'why' : 'text';
-        if (!offer[key]) offer[key] = p[2].replace(/^<(.*)>$/, '$1').trim();
+        const key = p[1].toLowerCase() === 'why' ? 'why' : 'text', n = +p[2] || 0;
+        if (!offers.has(n)) offers.set(n, { n });
+        if (!offers.get(n)[key]) offers.get(n)[key] = p[3].replace(/^<(.*)>$/, '$1').trim();
         return;
       }
       const m = meta(l);
@@ -926,7 +930,8 @@ const LLM = (() => {
       if (term && gloss && !terms.some(t => t.term.toLowerCase() === term.toLowerCase())) terms.push({ term, gloss: gloss.charAt(0).toUpperCase() + gloss.slice(1) });
     });
     const out = { text: lines.slice(0, cut).join('\n').replace(/\s+$/, ''), terms, next: next.slice(0, 3) };
-    if (offer.text) out.offer = { text: offer.text, why: offer.why || '' };
+    const proposed = [...offers.values()].filter(o => o.text).map(o => ({ n: o.n, text: o.text, why: o.why || '' }));
+    if (proposed.length) out.offers = proposed;
     if (memo.size > 400) memo.clear();
     memo.set(raw, out);
     return out;

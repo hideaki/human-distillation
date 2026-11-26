@@ -158,16 +158,19 @@ test('the sheet goes with the turn being asked, and with no other', async () => 
   assert.equal(turns[3].content, 'Why do you ask?');
 });
 
-test('Claude is told what the sheet is, and when to propose an answer, only where that applies', async () => {
+test('Claude is told what the sheet is, and when to propose an answer, in every thread of a conversation that has one', async () => {
   const SHEET_LINE = 'The answer that was sent here asks this person questions.';
-  const OFFER_LINE = 'This thread is about one question you asked the reader';
+  const OFFER_LINE = 'You may propose an answer to any question in the note, from any thread.';
   const inThread = (await sent({ sheet: SHEET, about: 'q2' }))[0].content;
   assert.ok(inThread.includes(SHEET_LINE) && inThread.includes(OFFER_LINE));
-  assert.ok(inThread.includes('"answer: <the answer, written so that it can be understood without this thread>" and "why: <one or two sentences of reason>"'));
+  // A proposal names its question by the number it has in the note.
+  assert.ok(inThread.includes('"answer 3: <the answer, written so that it can be understood without this thread>" and "why 3: <one or two sentences of reason>"'));
+  assert.ok(inThread.includes('At most one proposal for a question in a reply.'));
+  assert.ok(inThread.includes('never go down the list.'));
   assert.ok(inThread.indexOf(OFFER_LINE) < inThread.indexOf('Write nothing after those lines.'), 'the lines of a proposal belong to the @@@ section');
-  // Elsewhere in the same conversation: the sheet, but no proposals.
+  // A thread that is about no question may propose as well: it knows them all from the note.
   const elsewhere = (await sent({ sheet: SHEET, about: null }))[0].content;
-  assert.ok(elsewhere.includes(SHEET_LINE) && !elsewhere.includes(OFFER_LINE));
+  assert.ok(elsewhere.includes(SHEET_LINE) && elsewhere.includes(OFFER_LINE));
   // A conversation with no sheet is told nothing of either.
   const plain = await sent({});
   assert.ok(!plain[0].content.includes(SHEET_LINE) && !plain[0].content.includes(OFFER_LINE));
@@ -187,6 +190,7 @@ test('the helps and the check are worded by the app, and say so', () => {
   assert.equal(LLM.askedPrompt('Who will read it?', 'Does it matter?'), 'About this question you asked me: "Who will read it?"\n\nDoes it matter?');
   assert.deepEqual(Object.values(LLM.HELPS).map(h => h.q), ['Why do you ask?', 'What would you pick?', 'Help me answer']);
   assert.ok(LLM.CHECK.startsWith('Check my answers together') && LLM.CHECK.endsWith(LLM.WORDED));
+  assert.ok(LLM.CHECK.includes('Where changing one answer would settle a conflict, you may propose that answer.'));
   assert.ok(LLM.CHECK_AGAIN.startsWith('I have changed my answers.') && LLM.CHECK_AGAIN.endsWith(LLM.WORDED));
 });
 
@@ -198,15 +202,33 @@ test('LLM.parse: a proposed answer and its reason, under the separator', () => {
     text: 'I would take the first.',
     terms: [{ term: 'CSV', gloss: 'Comma-separated values.' }],
     next: ['What else?'],
-    offer: { text: 'My team only', why: 'Two colleagues review it.' },
+    offers: [{ n: 0, text: 'My team only', why: 'Two colleagues review it.' }],
   });
-  assert.deepEqual(LLM.parse('A.\n@@@\nAnswer: Yes').offer, { text: 'Yes', why: '' });
-  // One proposal a reply: the first wins.
-  assert.deepEqual(LLM.parse('A.\n@@@\nanswer: One\nanswer: Two\nwhy: First\nwhy: Second').offer, { text: 'One', why: 'First' });
+  assert.deepEqual(LLM.parse('A.\n@@@\nAnswer: Yes').offers, [{ n: 0, text: 'Yes', why: '' }]);
+  // One proposal for a question: the first wins.
+  assert.deepEqual(LLM.parse('A.\n@@@\nanswer: One\nanswer: Two\nwhy: First\nwhy: Second').offers, [{ n: 0, text: 'One', why: 'First' }]);
+});
+
+test('LLM.parse: a proposal names its question by number, and a reply may hold one for each of several', () => {
+  const p = LLM.parse('This settles 6 and changes 4.\n\n@@@\nanswer 6: <B, with the proposal>\nwhy 6: Both judges see the same.\nanswer 4: The card says where the reasons were written.\nwhy 4: It catches the slip.\nnext: And 7?');
+  assert.deepEqual(p.offers, [
+    { n: 6, text: 'B, with the proposal', why: 'Both judges see the same.' },
+    { n: 4, text: 'The card says where the reasons were written.', why: 'It catches the slip.' },
+  ]);
+  assert.deepEqual([p.text, p.next], ['This settles 6 and changes 4.', ['And 7?']]);
+  // The first for a question wins, and each "why" goes to the answer with its number.
+  assert.deepEqual(LLM.parse('A.\n@@@\nanswer 2: One\nwhy 3: For three\nanswer 2: Two\nanswer 3: Three\nwhy 2: For two').offers,
+    [{ n: 2, text: 'One', why: 'For two' }, { n: 3, text: 'Three', why: 'For three' }]);
+  // Other ways of writing the number.
+  assert.deepEqual(LLM.parse('A.\n@@@\n- Answer to question 12: Yes\n- Why for question 12: Because.\nanswer #1: No').offers,
+    [{ n: 12, text: 'Yes', why: 'Because.' }, { n: 1, text: 'No', why: '' }]);
+  // One with a number and one without, in the same reply.
+  assert.deepEqual(LLM.parse('A.\n@@@\nanswer: Here\nanswer 5: There').offers, [{ n: 0, text: 'Here', why: '' }, { n: 5, text: 'There', why: '' }]);
 });
 
 test('LLM.parse: no proposal without an answer line, and none above the separator', () => {
-  assert.ok(!('offer' in LLM.parse('A.\n@@@\nwhy: A reason alone\nnext: More?')));
+  assert.ok(!('offers' in LLM.parse('A.\n@@@\nwhy: A reason alone\nwhy 2: Another\nnext: More?')));
+  assert.deepEqual(LLM.parse('The working.\nAnswer 2: 42'), { text: 'The working.\nAnswer 2: 42', terms: [], next: [] });
   // "Answer: 42" may end any answer: without the separator it is the answer's text.
   assert.deepEqual(LLM.parse('The working.\nAnswer: 42'), { text: 'The working.\nAnswer: 42', terms: [], next: [] });
   assert.deepEqual(LLM.parse('The working.\nanswer: 42\nnext: And then?'), { text: 'The working.\nanswer: 42', terms: [], next: ['And then?'] });

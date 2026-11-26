@@ -261,9 +261,13 @@ with its questions marked, and you can settle them one at a time.
   has a thread, its menu leads to the thread instead. Claude in the page
   did not ask the question. What it says about it is inferred from what
   was sent, and it is asked to say so.
-- **A proposed answer.** When a reply in that thread arrives at an answer,
-  it ends with the answer, a short reason and "Use as my answer". Nothing
-  joins your answers until you press that or type your own.
+- **A proposed answer.** When a reply arrives at an answer, it ends with
+  the answer, a short reason and "Use as my answer". Any thread of the
+  conversation may propose for any of the questions, since each knows them
+  all: a side point of one question often settles another, or changes an
+  answer you gave. The box says which question it is for, and for one you
+  have answered it shows your answer and offers "Replace my answer".
+  Nothing joins your answers until you press the button or type your own.
 - **The sheet.** Your answers are kept together in a strip above the
   message box: "3 questions for you, 1 settled". Every question you ask
   Claude in that conversation is sent with the answers as they stand, so
@@ -506,8 +510,10 @@ the conversation, in `app.js`): one entry per question, with the reader's
 answer, reason and state. The page finds each `quote` in the drawn text and
 marks it. An entry with no quote, or with one that is not found, has no mark
 and is reached from the strip. Only the reader's own actions write to the sheet. Claude's reply
-in a question's thread may end with `answer:` and `why:` lines under the
-`@@@`, which the page shows as a proposal with a button. Every question
+in any thread of the conversation may end with lines such as `answer 3:`
+and `why 3:` under the `@@@`, where 3 is the number the question has in
+the sheet as Claude is sent it. The page shows each as a proposal with a
+button, one for a question. Every question
 asked in that conversation is sent with the sheet as it stands, added to
 the turn being asked and not kept in it, so no thread goes by an answer
 that has since changed.
@@ -718,7 +724,8 @@ The inbox has a stand-in too, a store kept in the browser:
 `claude.deliver({ answer: "…" })` in the browser's console sends any other
 document, as a Claude chat would. In the thread of a question, "What would
 you pick?" makes the stand-in propose an answer, and so does `#offer` in a
-typed message.
+typed message. `#offer:1,3` in any thread of that conversation makes it
+propose answers to questions 1 and 3.
 
 ## Tests
 

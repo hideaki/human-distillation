@@ -394,7 +394,7 @@
   const qrows = () => $$('.qrow', strip()).map(r => [txt($('.n', r)), txt($('.q', r)), txt($('.a', r))]);
   const askMenu = () => until(() => $('#pop.show.askpop'), 'the menu of the question', 5000);
   const NOTE_HEAD = '(The app added this note. The questions your sent answer asks me, and my answers so far:';
-  const OFFER_RULE = 'This thread is about one question you asked the reader';
+  const OFFER_RULE = 'You may propose an answer to any question in the note, from any thread.';
 
   async function sentWithQuestions(o) {
     await load({ ...o, inbox: { q: QDOC } });
@@ -1872,13 +1872,14 @@
     same([node(pick).parent, node(pick).help, node(pick).anchor], [th, 'pick', null], 'The next turn of the same thread');
     const box = () => $(`.turn[data-node="${pick}"] .offer`, pane(th));
     await until(box, 'the proposed answer');
-    same([txt($('.k', box())), txt($('.a', box())), txt($('.y', box()))], ['Proposed answer', 'Placeholder answer from the stand-in', 'The stand-in proposes this so that the button can be tried.'], 'The proposal');
+    same([txt($('.k', box())), txt($('.a', box())), txt($('.y', box()))], ['Proposed answer to question 2', 'Placeholder answer from the stand-in', 'The stand-in proposes this so that the button can be tried.'], 'The proposal');
+    same([!!$('.q', box()), !!$('.was', box())], [false, false], 'In the question\'s own thread it does not repeat the question, and an open question has no answer to show');
     eq(entry(2).state, 'open', 'Nothing reaches the sheet until the reader takes it');
     await click(button(box(), 'Use as my answer'), '"Use as my answer"');
     await until(() => entry(2).state === 'answered', 'the answer to reach the sheet');
     same([entry(2).answer, entry(2).why, entry(2).from], ['Placeholder answer from the stand-in', 'The stand-in proposes this so that the button can be tried.', pick], 'The entry');
     has(toastText(), 'Added to your answers.', 'The toast');
-    same([txt($('.k', box())), !!button(box(), 'Use as my answer')], ['✓ On your sheet', false], 'The proposal once taken');
+    same([txt($('.k', box())), !!button(box(), 'Use as my answer')], ['✓ On your sheet: question 2', false], 'The proposal once taken');
     has(txt($('.banner.onsheet', pane(th))), '✓ Your answer', 'The thread says what the sheet holds');
     ok(pane(th) && node(th).status === 'open', 'Taking an answer leaves the thread open');
     ok(qmark(2).classList.contains('answered'), 'The mark');
@@ -1892,8 +1893,9 @@
     ok(!$(`.turn[data-node="${typed}"] .offer`), 'No proposal');
     const again = await sendIn(th, 'Then say it #offer');
     await answered(again);
-    await until(() => $(`.turn[data-node="${again}"] .offer`), 'a second proposal');
+    const second = await until(() => $(`.turn[data-node="${again}"] .offer`), 'a second proposal');
     eq($$('.offer.on', pane(th)).length, 1, 'Only the one that was taken says so');
+    same([txt($('.was', second)), $$('button', second).map(txt)], ['Now: Placeholder answer from the stand-in', ['Replace my answer']], 'A proposal for a settled question shows what the sheet holds, and offers to replace it');
 
     // Rewording the answer unties it from the proposal.
     await click(button($('.banner.onsheet', pane(th)), 'Change'), '"Change"');
@@ -1931,8 +1933,88 @@
     const side = await explain();
     has(lastCall().prompt, NOTE_HEAD, 'The sheet travels with it');
     lacks(lastCall().prompt, 'This thread is about question', 'It is about no question');
-    lacks(lastCall().turns[0].content, OFFER_RULE, 'It is not asked to propose');
+    has(lastCall().turns[0].content, OFFER_RULE, 'It may propose all the same');
     same([node(side).anchor.ask || null, !!$(`mark[data-node="${side}"]`, mainText())], [null, true], 'An ordinary thread, with its mark');
+    ok(!$('.offer', pane(side)), 'It proposes nothing unasked');
+  });
+
+  test('Questions', 'any thread may propose an answer to any question: the box names the question, and shows what the sheet holds for it', async () => {
+    await sentWithQuestions();
+    await answerIn(1, 'Yes');
+    const boxes = id => $$(`.turn[data-node="${id}"] .offer`);
+    const shown = b => [txt($('.k', b)), $('.q', b) ? txt($('.q', b)) : null, $('.was', b) ? txt($('.was', b)) : null, txt($('.a', b)), $$('button', b).map(txt)];
+
+    // In the first thread, which is about no question: two proposals in
+    // one reply, each for the question it names. A number that no question
+    // has draws nothing.
+    const both = await sendIn('root', 'What follows from that? #offer:1,3,9');
+    await answered(both);
+    lacks(lastCall().prompt, 'This thread is about question', 'The thread is about no question');
+    has(lastCall().turns[0].content, OFFER_RULE, 'The instructions say that it may propose');
+    await until(() => boxes(both).length === 2, 'the two proposals');
+    same(shown(boxes(both)[0]), ['Proposed answer to question 1', Q[0], 'Now: Yes', 'Placeholder answer to question 1', ['Replace my answer']], 'For a question that has an answer');
+    same(shown(boxes(both)[1]), ['Proposed answer to question 3', Q[2], null, 'Placeholder answer to question 3', ['Use as my answer']], 'For an open question');
+    same([entry(1).answer, entry(3).state], ['Yes', 'open'], 'Nothing reaches the sheet until the reader takes it');
+    await click(button(boxes(both)[1], 'Use as my answer'), '"Use as my answer"');
+    await until(() => entry(3).state === 'answered', 'the answer to question 3');
+    same([entry(3).answer, entry(3).why, entry(3).from, entry(1).answer], ['Placeholder answer to question 3', 'The stand-in proposes this for question 3.', both, 'Yes'], 'Only that question is answered');
+    has(toastText(), 'Added to your answers.', 'The toast');
+    await click(button(boxes(both)[0], 'Replace my answer'), '"Replace my answer"');
+    await until(() => entry(1).answer === 'Placeholder answer to question 1', 'the answer to question 1 to be replaced');
+    has(toastText(), 'Your answer is replaced.', 'The toast');
+    same(boxes(both).map(b => [txt($('.k', b)), $$('button', b).length]), [['✓ On your sheet: question 1', 0], ['✓ On your sheet: question 3', 0]], 'Both say that they are on the sheet');
+    ok(qmark(1).classList.contains('answered') && qmark(3).classList.contains('answered'), 'The marks');
+    // A proposal that names no question has none to go to here.
+    const none = await sendIn('root', 'And then? #offer');
+    await answered(none);
+    await sleep(100);
+    eq(boxes(none).length, 0, 'A proposal with no number, in a thread about no question');
+
+    // A passage inside the thread of a question: its thread is about that
+    // question too, so a proposal with no number goes to it. The box says
+    // which question, since the thread's heading is the passage.
+    const th = await helpFrom(2);
+    await until(() => pane(th), 'the thread of the second question');
+    await click(sentence(answerText(th), 'What do you use it for?'), 'a sentence of the help');
+    const side = await explain();
+    same([node(side).parent, node(side).anchor.ask || null], [th, null], 'A passage thread inside the thread of the question');
+    has(lastCall().prompt, 'This thread is about question 2.', 'It is told which question it comes from');
+    has(txt(answerText(side)), 'Placeholder answer about the part you pointed at.', 'It is answered as a passage');
+    eq(boxes(side).length, 0, 'An explanation proposes nothing');
+    const agreed = await sendIn(side, 'Yes, I agree. Can you propose it? #offer');
+    await answered(agreed);
+    await until(() => boxes(agreed).length === 1, 'the proposal in the passage thread');
+    same(shown(boxes(agreed)[0]), ['Proposed answer to question 2', Q[1], null, 'Placeholder answer from the stand-in', ['Use as my answer']], 'The proposal');
+    await click(button(boxes(agreed)[0], 'Use as my answer'), '"Use as my answer"');
+    await until(() => entry(2).state === 'answered', 'the answer to question 2');
+    same([entry(2).answer, entry(2).from], ['Placeholder answer from the stand-in', agreed], 'The entry');
+    // The same thread may propose for another question as well.
+    const other = await sendIn(side, 'That changes the fourth. #offer:4');
+    await answered(other);
+    await until(() => boxes(other).length === 1, 'the proposal for another question');
+    same(shown(boxes(other)[0]), ['Proposed answer to question 4', Q[3], null, 'Placeholder answer to question 4', ['Use as my answer']], 'For another question than the thread\'s own');
+
+    // The check may propose the change that settles a conflict.
+    await click($('header .icon', pane(side)), 'the × of the passage thread');
+    await click($('header .icon', pane(th)), 'the × of the thread');
+    await until(() => !pane(th) && !pane(side), 'the first thread alone');
+    const before = ids();
+    await click(button(strip(), 'Check them together'), '"Check them together"');
+    const check = await fresh(before, 'the check to be asked');
+    await answered(check);
+    has(lastCall().turns[0].content, OFFER_RULE, 'The check may propose');
+    has(lastCall().prompt, 'Where changing one answer would settle a conflict, you may propose that answer.', 'It is asked for the change that settles a conflict');
+    eq(boxes(check).length, 0, 'The stand-in\'s check proposes nothing');
+    const fix = await sendIn(check, 'Then change the second. #offer:2');
+    await answered(fix);
+    await until(() => boxes(fix).length === 1, 'the proposal in the check');
+    same(shown(boxes(fix)[0]), ['Proposed answer to question 2', Q[1], 'Now: Placeholder answer from the stand-in', 'Placeholder answer to question 2', ['Replace my answer']], 'The proposal');
+    const unnamed = await sendIn(check, 'And which else? #offer');
+    await answered(unnamed);
+    await sleep(100);
+    eq(boxes(unnamed).length, 0, 'In the check a proposal has to name its question');
+    tidy('Proposals from any thread');
+    noSideways('Proposals from any thread');
   });
 
   test('Questions', 'a question typed in the menu starts the thread in the reader\'s own words, and Enter in the empty box asks for help', async () => {
@@ -2052,7 +2134,6 @@
     eq($('.composer .msg', pane(th)).placeholder, 'Ask about the check…', 'Its message box');
     has(lastCall().prompt, `1. ${Q[0]}\n   My answer: Yes\n   Why: The finance team edits it there.\n2. ${Q[1]}\n   Not answered yet.`, 'It is sent the answers with their reasons');
     lacks(lastCall().prompt, 'This thread is about question', 'It is about all of them');
-    lacks(lastCall().turns[0].content, OFFER_RULE, 'It is not asked to propose');
     eq(lastCall().turns.length, 4, 'The turns sent: the sent conversation and the check');
     has(txt(answerText(th)), 'The stand-in was shown 1 settled answer and', 'The reply');
     same([qsheet().checked, qsheet().rev, stripNote()], [1, 1, ''], 'The sheet knows it was checked');

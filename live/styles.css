@@ -500,6 +500,10 @@ mark.resolved.last::after { content: "✓"; color: var(--done-line); }
 .offer.on { border-color: var(--done-line); }
 .offer .k { font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--queued-line); }
 .offer.on .k { color: var(--done-line); }
+/* which question it is for, when that is not the thread's own, and what the sheet holds for it now */
+.offer .q { font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.offer .was { font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.offer .was b { font-weight: 600; }
 .offer .a { font: 16px/1.5 var(--read); }
 .offer .y { font-size: 13px; color: var(--muted); }
 .offer .btn { margin-top: 6px; }

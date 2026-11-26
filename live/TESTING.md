@@ -94,9 +94,10 @@ node --test live/test/sheet.test.js
 asks its reader. It checks that `LLM.fromInbox` reads the sender's list,
 that `findQuote` (lifted from `app.js`) finds a question in the drawn text
 when the sender's quote still has its Markdown, what `LLM.sheetNote` tells
-Claude and that it goes with the turn being asked and no other, when
-`rules()` allows a proposed answer, that `LLM.parse` reads one only under
-the `@@@`, and the wording of the copied reply.
+Claude and that it goes with the turn being asked and no other, that
+`rules()` allows a proposed answer in every thread of such a conversation,
+that `LLM.parse` reads proposals only under the `@@@` and by the number of
+their question, and the wording of the copied reply.
 
 ## Static check
 

@@ -56,7 +56,8 @@ in step when a feature is added or the way to publish changes.
   sample answer arrive that asks the reader four questions, the last with
   no quote and worded with its options (in a question's
   thread, "What would you pick?" or `#offer` makes the stand-in propose an
-  answer), `?send=sample` has a
+  answer, and `#offer:1,3` in any thread proposes for questions 1 and 3),
+  `?send=sample` has a
   sample answer arrive, `claude.deliver({...})` in the console sends any
   other, `?missing=db` is a copy published without the store, and `?visitor`
   a viewer who is not the owner.
@@ -169,9 +170,14 @@ uses the user's existing connections with no sign-in of its own.
   opens it. Every question of the
   conversation is sent with `LLM.sheetNote`, added to the turn being asked
   in `turnsFor` and never kept in a turn's `prompt`, so a thread always goes
-  by the answers as they stand. In a question's thread `rules()` allows a
-  proposal: `answer:` and `why:` under the `@@@`, read by `LLM.parse` as
-  `offer` only below the separator, since "Answer: 42" may end any answer.
+  by the answers as they stand. In every thread of such a conversation
+  `rules()` allows proposals, for any of the questions: `answer 3:` and
+  `why 3:` under the `@@@`, with the number the question has in the note.
+  `LLM.parse` reads them as `offers` (`n`, `text`, `why`) only below the
+  separator, since "Answer: 42" may end any answer. One with no number
+  (`n` 0) is for the question its thread is about (`askOf`: the question's
+  own thread, or a passage thread inside it), and is dropped elsewhere.
+  `offerBox` names the question and shows the answer it would replace.
   Claude here did not ask the questions: the "why" prompt tells it to say
   when it infers. "Copy reply" is `LLM.replyText`, with no call. The design
   and what was decided against (marking assumptions, reasons from the

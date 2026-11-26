@@ -175,10 +175,14 @@
   const askById = id => { const sh = sheetNow(); return (sh && sh.asks.find(a => a.id === id)) || null; };
   const askThread = id => { const sh = sheetNow(); return (sh && anchoredKids(sh.node).find(n => n.anchor.ask === id)) || null; };
   const checkThread = () => { const sh = sheetNow(); return (sh && anchoredKids(sh.node).find(n => n.anchor.check)) || null; };
-  // The question a turn's thread is about, by id: the nearest attachment
-  // above the turn decides, so a passage thread inside it is about none.
+  // The question a turn's thread is about, by id. A thread opened from a
+  // passage inside the thread of a question is about that question too. The
+  // check, and a thread from the sent answer's own text, are about none.
   function askOf(nodes, id) {
-    for (let n = nodes[id]; n; n = nodes[n.parent]) if (n.anchor) return n.anchor.ask || null;
+    for (let n = nodes[id]; n; n = nodes[n.parent]) {
+      if (n.anchor && n.anchor.ask) return n.anchor.ask;
+      if (n.anchor && n.anchor.check) return null;
+    }
     return null;
   }
 
@@ -1801,10 +1805,16 @@
     }
     if (n.truncated) ai.append(el('div.fine', {}, 'This answer reached the length limit and stops early. Ask for the rest, or for less at a time.'));
     if (n.sources && n.sources.length) ai.append(...sources(n.sources));
-    // An answer the helper proposes to the question this thread is about.
-    const offered = n.phase === 'done' && LLM.parse(n.raw).offer;
-    const forAsk = offered ? askById(askOf(state.nodes, n.id)) : null;
-    if (forAsk) ai.append(offerBox(n, forAsk, offered));
+    // The answers the helper proposes: each for the question it names by
+    // its number, or for the one this thread is about when it names none.
+    const offered = (n.phase === 'done' && sheetNow() && LLM.parse(n.raw).offers) || [];
+    const boxed = new Set();
+    offered.forEach(o => {
+      const a = o.n ? sheetNow().asks[o.n - 1] : askById(askOf(state.nodes, n.id));
+      if (!a || boxed.has(a.id)) return;
+      boxed.add(a.id);
+      ai.append(offerBox(n, a, o));
+    });
     // Where the turns that were sent here end, and the reader's own begin.
     if (n.given && !(path[i + 1] && N(path[i + 1]).given)) {
       ai.append(el('div.fine.origin', {}, n.parent
@@ -2391,14 +2401,28 @@
   }
 
   // What the helper proposes under one of its replies, and the button that
-  // takes it. Once taken it says so, until the answer is changed.
+  // takes it. Once taken it says so, until the answer is changed. Any
+  // thread may propose for any question, so the box says which one: by its
+  // number, and by its words unless this is the question's own thread. For
+  // a question that is settled it shows what the sheet holds now.
   function offerBox(n, a, o) {
+    const asks = sheetNow().asks, which = asks.length > 1 ? 'question ' + (asks.indexOf(a) + 1) : '';
     const on = a.state === 'answered' && a.from === n.id;
+    const settled = !on && a.state !== 'open';
+    let top = n;
+    while (top && !top.anchor) top = N(top.parent);
+    const own = !!top && top.anchor.ask === a.id;
+    const take = () => {
+      settle(a.id, { state: 'answered', answer: o.text, why: o.why, from: n.id });
+      toast(settled ? 'Your answer is replaced.' : 'Added to your answers.');
+    };
     return el('div.offer', { class: on ? 'on' : '' },
-      el('div.k', {}, on ? '✓ On your sheet' : 'Proposed answer'),
+      el('div.k', {}, on ? '✓ On your sheet' + (which && ': ' + which) : 'Proposed answer' + (which && ' to ' + which)),
+      !own && el('div.q', {}, a.q),
+      settled && el('div.was', {}, el('b', {}, 'Now: '), a.state === 'left' ? 'Left to the asker' : a.answer),
       el('div.a', {}, rich(o.text)),
       o.why && el('div.y', {}, rich(o.why)),
-      !on && el('button.btn', { on: { click: () => { settle(a.id, { state: 'answered', answer: o.text, why: o.why, from: n.id }); toast('Added to your answers.'); } } }, 'Use as my answer'));
+      !on && el('button.btn', { on: { click: take } }, settled ? 'Replace my answer' : 'Use as my answer'));
   }
 
   // The sheet, as a strip above the message box of the first thread: one

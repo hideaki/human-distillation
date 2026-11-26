@@ -56,7 +56,7 @@
   // later column starts at a turn attached to a passage in the column before.
 
   let store, state, prefs;
-  const ui = { pending: null, back: {}, shown: [], shownConv: null, places: {}, resizing: false, focus: null, focusInput: null, glossPinned: false, confirmDel: null, unfolded: {} };
+  const ui = { pending: null, back: {}, shown: [], shownConv: null, places: {}, resizing: false, focus: null, focusInput: null, glossPinned: false, confirmDel: null, unfolded: {}, sheetOpen: {}, reply: null };
   const live = {}; // answers being written: "<conversation>/<turn>" -> { ctl, sources }
 
   const N = id => state.nodes[id];
@@ -143,8 +143,66 @@
 
   function label(n) {
     if (!n.parent) return clip(topic(), 90);
+    if (n.anchor && n.anchor.check) return n.anchor.text;
     if (n.anchor) return n.anchor.sym ? '$' + n.anchor.sym + '$' : n.anchor.math || formulaOnly(n.anchor.text) ? clip(n.anchor.text, 46) : quote(n.anchor.text);
     return n.back ? 'Explained back: ' + clip(n.q, 38) : clip(n.q, 52);
+  }
+
+  // ---------- the questions a sent answer asks ----------
+  // A conversation that was sent here may come with the questions its last
+  // answer asks the reader (see llm.js). `state.sheet` holds them with the
+  // reader's answers, one sheet for the conversation:
+  //   { rev, checked, copied, node, asks: [{ id, quote, q, state, answer, why, from, start, end }] }
+  // `node` is the turn whose answer asks them. An entry's `state` is 'open',
+  // 'answered' or 'left' (left to the asker); `from` is the turn a proposed
+  // answer was taken from; `start` and `end` are where `quote` was found in
+  // the answer's text, null when it was not. `rev` goes up with every
+  // change, and `checked` and `copied` are the `rev` the check last read
+  // and the reply last took.
+  //
+  // Only the reader's own actions write to the sheet (`settle`). A thread's
+  // Claude can propose an answer and no more. Every question asked of
+  // Claude in the conversation is sent with the sheet as it stands, so the
+  // threads share their conclusions though none sees another's discussion.
+  //
+  // A question's thread is a side thread whose anchor names the question
+  // (`ask`), and the check of all the answers is one whose anchor has
+  // `check`. Neither draws a mark of its own in the text.
+
+  // Past the end of any answer: where a thread with no passage is attached.
+  const FAR = 1e9;
+  const sheetNow = () => (state.sheet && state.sheet.asks.length ? state.sheet : null);
+  const askById = id => { const sh = sheetNow(); return (sh && sh.asks.find(a => a.id === id)) || null; };
+  const askThread = id => { const sh = sheetNow(); return (sh && anchoredKids(sh.node).find(n => n.anchor.ask === id)) || null; };
+  const checkThread = () => { const sh = sheetNow(); return (sh && anchoredKids(sh.node).find(n => n.anchor.check)) || null; };
+  // The question a turn's thread is about, by id: the nearest attachment
+  // above the turn decides, so a passage thread inside it is about none.
+  function askOf(nodes, id) {
+    for (let n = nodes[id]; n; n = nodes[n.parent]) if (n.anchor) return n.anchor.ask || null;
+    return null;
+  }
+
+  // Where a quote stands in an answer's text, as [start, end], or null. The
+  // quote is the sender's copy of words from the answer's source, so it may
+  // differ from the drawn text in its spacing and its markup: the stars of
+  // bold, backticks, a link's address, the dollar signs of a formula. So
+  // where the quote is not there as it is, its letters and digits decide.
+  function findQuote(full, wanted) {
+    const q = String(wanted || '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').trim();
+    const keep = /[\p{L}\p{N}]/u, at = [];
+    let bare = '', want = '';
+    for (let i = 0; i < q.length; i++) if (keep.test(q[i])) want += q[i];
+    // Less than two letters is too little to tell one place from another.
+    if (want.length < 2) return null;
+    const exact = full.indexOf(q);
+    if (exact >= 0) return [exact, exact + q.length];
+    for (let i = 0; i < full.length; i++) if (keep.test(full[i])) { bare += full[i]; at.push(i); }
+    const hit = bare.indexOf(want);
+    if (hit < 0) return null;
+    let end = at[hit + want.length - 1] + 1;
+    // The mark that closes a question belongs to it.
+    while (end < full.length && /[?？!！.。)"”’」』]/.test(full[end])) end++;
+    return [at[hit], end];
   }
 
   // ---------- storage ----------
@@ -165,6 +223,7 @@
       c.tips = c.tips || {};
       c.looked = c.looked || {};
       delete c.teach; // drafts of "Explain it back", from before it became a turn
+      if (c.sheet && (!Array.isArray(c.sheet.asks) || !c.nodes[c.sheet.node])) delete c.sheet;
       Object.values(c.nodes).forEach(n => {
         // An answer that was still being written when the page closed.
         if (busy(n)) {
@@ -772,7 +831,7 @@
 
   // What a thread is attached to, for a heading: a passage, a formula, or a
   // symbol and the formula it is in.
-  const anchorKids = (a, n) => (a.sym ? [rich('$' + a.sym + '$'), el('span.in', {}, ' in '), rich(clip(a.text, n))] : quoted(clip(a.text, n)));
+  const anchorKids = (a, n) => (a.check ? [a.text] : a.sym ? [rich('$' + a.sym + '$'), el('span.in', {}, ' in '), rich(clip(a.text, n))] : quoted(clip(a.text, n)));
   // The same, in words for Claude.
   const about = a => (a.sym ? `the symbol $${a.sym}$ in ${a.text}` : a.text);
 
@@ -1050,7 +1109,7 @@
     return inter / ((a.end - a.start) + (b.end - b.start) - inter);
   }
 
-  const findExisting = p => anchoredKids(p.nodeId).find(n => (p.part
+  const findExisting = p => anchoredKids(p.nodeId).find(n => !n.anchor.ask && !n.anchor.check && (p.part
     ? n.anchor.part === p.part && n.anchor.fig === p.fig
     : p.sym ? n.anchor.sym === p.sym && n.anchor.start === p.start
       : !n.anchor.part && !n.anchor.sym && iou(n.anchor, p) >= 0.8));
@@ -1097,7 +1156,9 @@
       notion: !!n.notion,
       web: !!n.web,
       tier: prefs.tier,
-      effort: n.verb || n.back ? 'low' : null, // one-click questions and checks should come back quickly
+      effort: n.verb || n.back || n.help ? 'low' : null, // one-click questions and checks should come back quickly
+      sheet: conv.sheet && conv.sheet.asks.length ? conv.sheet : null,
+      about: askOf(conv.nodes, id),
       signal: ctl.signal,
       onText: raw => { if (mine()) { n.raw = raw; n.phase = 'streaming'; paint(conv, id); } },
       onTool: list => { if (mine()) { job.sources = list; paint(conv, id); } },
@@ -1381,6 +1442,13 @@
       parent = id;
     });
     c.seq = g.turns.length;
+    // The questions the last of those answers asks the reader.
+    if (g.asks) {
+      c.sheet = {
+        rev: 0, checked: 0, copied: 0, node: parent,
+        asks: g.asks.map((x, i) => ({ id: 'q' + (i + 1), quote: x.quote, q: x.q, state: 'open', answer: '', why: '', from: '', start: null, end: null })),
+      };
+    }
     c.cols = [{ start: 'root', leaf: parent }];
     c.tips = { root: parent };
     return c;
@@ -1558,7 +1626,7 @@
   // The top of what the thread `n` is attached to, if it is in this pane.
   function anchorTop(body, n) {
     const t = body.querySelector(`.text[data-node="${n.parent}"]`), a = n.anchor;
-    if (!t) return null;
+    if (!t || a.start >= FAR) return null;
     if (a.part) {
       const fig = t.querySelector(`.figure[data-fig="${a.fig}"]`);
       const part = fig && fig.shadowRoot && [...fig.shadowRoot.querySelectorAll('.part')].find(e => e.dataset.part === a.part);
@@ -1659,11 +1727,23 @@
         el('span', {}, rich(start.takeaway || '')),
         el('button.linkbtn', { on: { click: () => { start.status = 'open'; render(); } } }, 'Reopen')));
     }
+    // A question's thread says what the sheet holds for it.
+    const mine = start.anchor && start.anchor.ask ? askById(start.anchor.ask) : null;
+    if (mine && mine.state !== 'open') {
+      body.append(el('div.banner.onsheet', {},
+        el('b', {}, mine.state === 'left' ? 'Left to the asker' : '✓ Your answer'),
+        el('span', {}, mine.state === 'answered' ? rich(mine.answer) : ''),
+        el('button.linkbtn', { on: { click: ev => openAskPop(mine.id, ev.currentTarget.getBoundingClientRect()) } }, 'Change')));
+    }
     // A conversation that was sent here with a summary of the earlier chat.
     const sum = !start.parent && start.given ? LLM.summaryIn(start.prompt) : '';
     if (sum) body.append(summaryBox(sum));
     path.forEach((id, i) => body.append(turn(N(id), ci, path, i)));
-    p.append(body, composer(col, ci, path));
+    p.append(body);
+    // The sheet of a sent conversation's questions, above the first thread's box.
+    const bar = ci === 0 ? sheetStrip() : null;
+    if (bar) p.append(bar);
+    p.append(composer(col, ci, path));
     return p;
   }
 
@@ -1721,6 +1801,10 @@
     }
     if (n.truncated) ai.append(el('div.fine', {}, 'This answer reached the length limit and stops early. Ask for the rest, or for less at a time.'));
     if (n.sources && n.sources.length) ai.append(...sources(n.sources));
+    // An answer the helper proposes to the question this thread is about.
+    const offered = n.phase === 'done' && LLM.parse(n.raw).offer;
+    const forAsk = offered ? askById(askOf(state.nodes, n.id)) : null;
+    if (forAsk) ai.append(offerBox(n, forAsk, offered));
     // Where the turns that were sent here end, and the reader's own begin.
     if (n.given && !(path[i + 1] && N(path[i + 1]).given)) {
       ai.append(el('div.fine.origin', {}, n.parent
@@ -1827,7 +1911,24 @@
     });
 
     const starts = new Set(state.cols.map(c => c.start));
+    // The questions this answer asks the reader, each marked where it stands.
+    const sh = sheetNow();
+    if (sh && sh.node === n.id) {
+      sh.asks.forEach(a => {
+        const hit = findQuote(full, a.quote);
+        a.start = hit ? hit[0] : null;
+        a.end = hit ? hit[1] : null;
+        if (!hit) return;
+        const th = askThread(a.id);
+        const cls = a.state + (th && starts.has(th.id) ? ' active' : '');
+        const made = wrapRange(t, hit[0], hit[1], () => el('span.askq', { class: cls, 'data-ask': a.id, title: askTitle(a) }),
+          h => { h.classList.add('asked'); });
+        const bits = made.filter(m => m.classList.contains('askq'));
+        if (bits.length) bits[bits.length - 1].classList.add('last');
+      });
+    }
     anchoredKids(n.id).forEach(k => {
+      if (k.anchor.ask || k.anchor.check) return;
       const cls = k.status + (starts.has(k.id) ? ' active' : '') + (k.status === 'queued' && !busy(k) ? ' ready' : '');
       const title = k.status === 'resolved' ? (k.takeaway || 'Resolved') : k.status === 'queued' ? 'Queued: ' + k.q : k.q;
       if (k.anchor.part) {
@@ -1865,7 +1966,13 @@
     const start = N(col.start), leaf = N(col.leaf);
     const out = [];
     if (leaf.phase !== 'done' && !leaf.raw) return out;
-    if (start.anchor) {
+    if (start.anchor && start.anchor.ask) {
+      const had = new Set(path.map(id => N(id).help));
+      Object.keys(LLM.HELPS).filter(k => !had.has(k)).forEach(k => out.push({ label: LLM.HELPS[k].q, run: () => helpWith(start.anchor.ask, k) }));
+    } else if (start.anchor && start.anchor.check) {
+      const sh = sheetNow();
+      if (sh && sh.rev > sh.checked) out.push({ label: 'Check again', run: checkTogether });
+    } else if (start.anchor) {
       const asked = new Set(path.map(id => N(id).verb));
       Object.keys(VERBS).filter(v => v !== 'explain' && !asked.has(v)).slice(0, 3).forEach(v => out.push({
         label: VERBS[v].q,
@@ -1875,7 +1982,7 @@
     const taken = new Set(typedKids(leaf.id).map(k => k.q));
     LLM.parse(leaf.raw).next.filter(q => !taken.has(q)).slice(0, start.anchor ? 2 : 3)
       .forEach(q => out.push({ label: q, run: () => send(ci, q) }));
-    if (leaf.phase === 'done' && !leaf.back && !/^\s*```graph/m.test(leaf.raw)) {
+    if (leaf.phase === 'done' && !leaf.back && !(start.anchor && start.anchor.check) && !/^\s*```graph/m.test(leaf.raw)) {
       out.push({ label: 'Show this as a diagram', run: () => addTurn(ci, { q: 'Show this as a diagram', prompt: LLM.DRAW }) });
     }
     return out;
@@ -1949,7 +2056,7 @@
 
     const msg = el('textarea.msg', {
       id: 'msg-' + key, rows: '1', 'aria-label': back ? 'Your explanation' : 'Your question',
-      placeholder: back ? 'In your own words…' : !col ? 'Ask anything…' : !atEnd ? 'Continue from this point…' : start.anchor ? (start.anchor.part ? 'Ask more about this part of the diagram…' : start.anchor.sym ? 'Ask more about this symbol…' : start.anchor.math ? 'Ask more about this formula…' : 'Ask more about this passage…') : 'Ask a follow-up…',
+      placeholder: back ? 'In your own words…' : !col ? 'Ask anything…' : !atEnd ? 'Continue from this point…' : start.anchor ? (start.anchor.check ? 'Ask about the check…' : start.anchor.ask ? 'Ask more about this question…' : start.anchor.part ? 'Ask more about this part of the diagram…' : start.anchor.sym ? 'Ask more about this symbol…' : start.anchor.math ? 'Ask more about this formula…' : 'Ask more about this passage…') : 'Ask a follow-up…',
     });
     const form = el('form', {}, msg, el('button.btn.primary.send', {
       type: 'submit', disabled: parts.blocked, title: back ? 'Have Claude check it (⌘ or Ctrl + Enter)' : null,
@@ -2127,6 +2234,7 @@
     // One button for the common case, and a box for anything more specific.
     const pop = $('#pop');
     pop.textContent = '';
+    pop.classList.remove('askpop');
     const box = el('input', { type: 'text', id: 'pop-q', placeholder: p.part ? 'Ask about this part of the diagram…' : p.sym ? 'Ask about this symbol…' : p.math ? 'Ask about this formula…' : 'Ask about this part…', 'aria-label': 'Your question about this part', autocomplete: 'off' });
     const go = later => ask(p, box.value, later);
     box.addEventListener('keydown', ev => {
@@ -2147,7 +2255,7 @@
     clearHL('pending');
     if (ui.pendingEl) { ui.pendingEl.classList.remove('pending'); ui.pendingEl = null; }
     if (ui.pendingMath) { ui.pendingMath.forEach(h => h.classList.remove('pending')); ui.pendingMath = null; }
-    $('#pop').classList.remove('show');
+    $('#pop').classList.remove('show', 'askpop');
   }
 
   function place(pop, rect, below) {
@@ -2159,6 +2267,195 @@
     if (y + h > innerHeight - 8) y = Math.max(8, rect.top - h - 8);
     pop.style.left = x + 'px';
     pop.style.top = y + 'px';
+  }
+
+  // ---------- a question the reader was asked ----------
+
+  const askTitle = a => (a.state === 'answered' ? 'Your answer: ' + clip(a.answer, 140)
+    : a.state === 'left' ? 'Left to the asker. Click to change that.' : 'A question for you. Click to answer it, or to get help with it.');
+
+  // The menu of one question: an answer typed there, the helps, and leaving
+  // it to the asker. It opens at the question in the text, or at its row.
+  function openAskPop(id, rect) {
+    const a = askById(id);
+    if (!a) return;
+    hideGloss();
+    closePop();
+    ui.pending = { asked: id };
+    const pop = $('#pop');
+    pop.textContent = '';
+    pop.classList.add('askpop');
+    const th = askThread(id);
+    const box = el('input', { type: 'text', id: 'pop-q', placeholder: 'Type your answer…', 'aria-label': 'Your answer', autocomplete: 'off', value: a.state === 'answered' ? a.answer : null });
+    const why = el('input', { type: 'text', id: 'pop-why', placeholder: 'Your reason, if you want to give one', 'aria-label': 'Your reason', autocomplete: 'off', value: a.state === 'answered' && a.why ? a.why : null });
+    const keep = () => {
+      const v = box.value.trim();
+      if (!v) { box.focus(); return; }
+      // An answer taken from a proposal stays tied to it until it is reworded.
+      settle(id, { state: 'answered', answer: v, why: why.value.trim(), from: v === a.answer ? a.from : '' });
+    };
+    [box, why].forEach(f => f.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229) { ev.preventDefault(); keep(); }
+    }));
+    const mark = $(`#panes .askq[data-ask="${id}"]`);
+    pop.append(
+      el('div.q', {}, rich(a.q)),
+      el('div.line', {}, box, el('button.primary', { on: { click: keep } }, 'Save')),
+      el('div.line', {}, why),
+      el('div.line.helps', {}, Object.keys(LLM.HELPS).map(k => el('button', {
+        disabled: offline(), title: offline() ? 'Open this page inside Claude to get help with a question.' : null,
+        on: { click: () => helpWith(id, k) },
+      }, LLM.HELPS[k].q))),
+      el('div.line.more', {},
+        a.state !== 'left' && el('button', { title: 'Leave this decision to the chat that asked', on: { click: () => settle(id, { state: 'left', answer: '', why: '', from: '' }) } }, 'Your call'),
+        a.state !== 'open' && el('button', { title: 'Back to not answered', on: { click: () => settle(id, { state: 'open', answer: '', why: '', from: '' }) } }, 'Clear'),
+        th && el('button', { on: { click: () => { closePop(); showThread(th); } } }, 'Open the thread'),
+        mark && el('button', { on: { click: () => { closePop(); mark.scrollIntoView({ block: 'center' }); } } }, 'Show in the text')));
+    place(pop, rect, false);
+    if (!matchMedia('(hover: none)').matches) { box.focus({ preventScroll: true }); box.select(); }
+  }
+
+  // The one way an answer reaches the sheet: the reader's own action.
+  function settle(id, to) {
+    const sh = sheetNow(), a = askById(id);
+    if (!a) return;
+    Object.assign(a, to);
+    sh.rev++;
+    state.updated = Date.now();
+    closePop();
+    render();
+  }
+
+  // Put a thread on screen beside the turn it hangs from.
+  function showThread(n, focusId) {
+    const ci = state.cols.findIndex(c => colPath(c).includes(n.parent));
+    if (ci < 0) { reveal(focusId || n.id); return; }
+    openBeside(ci, n.id, focusId);
+    render();
+  }
+
+  // One of the helps with a question. It starts the question's thread, or
+  // is the next turn in it: a question has one thread, as a passage has.
+  function helpWith(id, kind) {
+    const sh = sheetNow(), a = askById(id);
+    if (!a || offline()) return;
+    closePop();
+    let th = askThread(id), focusId = null;
+    const props = { q: LLM.HELPS[kind].q, help: kind, prompt: LLM.helpPrompt(a.q, kind) };
+    if (!th) {
+      th = newNode({
+        parent: sh.node, ...props, ready: false, ...looksFor(sh.node, false),
+        anchor: { start: a.start == null ? FAR : a.start, end: a.end == null ? FAR : a.end, text: a.q, ask: id },
+      });
+      runNode(th.id);
+    } else {
+      const end = N(tipOf(th.id));
+      if (busy(end)) { toast('That thread is still being answered. Ask again in a moment.'); return; }
+      const m = newNode({ parent: end.id, ...props, ...looksFor(end.id, false) });
+      state.tips[th.id] = m.id;
+      focusId = m.id;
+      if (th.status === 'resolved') th.status = 'open';
+      runNode(m.id);
+    }
+    showThread(th, focusId);
+  }
+
+  // What the helper proposes under one of its replies, and the button that
+  // takes it. Once taken it says so, until the answer is changed.
+  function offerBox(n, a, o) {
+    const on = a.state === 'answered' && a.from === n.id;
+    return el('div.offer', { class: on ? 'on' : '' },
+      el('div.k', {}, on ? '✓ On your sheet' : 'Proposed answer'),
+      el('div.a', {}, rich(o.text)),
+      o.why && el('div.y', {}, rich(o.why)),
+      !on && el('button.btn', { on: { click: () => { settle(a.id, { state: 'answered', answer: o.text, why: o.why, from: n.id }); toast('Added to your answers.'); } } }, 'Use as my answer'));
+  }
+
+  // The sheet, as a strip above the message box of the first thread: one
+  // line until it is unfolded, then a row for each question.
+  function sheetStrip() {
+    const sh = sheetNow();
+    if (!sh) return null;
+    const open = !!ui.sheetOpen[state.id];
+    const n = sh.asks.length, done = sh.asks.filter(a => a.state !== 'open').length;
+    const notes = [
+      sh.checked > 0 && sh.rev > sh.checked && 'not checked since your last change',
+      sh.copied > 0 && sh.rev > sh.copied && 'changed since you copied',
+    ].filter(Boolean);
+    const box = el('div.sheetbar', { class: open ? 'open' : '' });
+    box.append(el('div.head', {},
+      el('button.linkbtn.fold', {
+        type: 'button', 'aria-expanded': String(open),
+        // Unfolded in place: the thread above keeps its drafts and its scroll.
+        on: { click: () => { ui.sheetOpen[state.id] = !open; box.replaceWith(sheetStrip()); } },
+      }, (open ? '▾ ' : '▸ ') + `${n} ${n === 1 ? 'question' : 'questions'} for you, ${done} settled`),
+      notes.length > 0 && el('span.note', {}, notes.join(' · ')),
+      el('span.grow'),
+      el('button.btn', { type: 'button', title: 'Have Claude read all your answers together and name any that conflict', on: { click: checkTogether } }, 'Check them together'),
+      el('button.btn', { type: 'button', title: 'Copy the questions with your answers, for pasting into the chat that asked', on: { click: copyReply } }, 'Copy reply')));
+    if (open) {
+      box.append(el('div.rows', {}, sh.asks.map((a, i) => el('button.qrow', {
+        type: 'button', class: a.state, 'data-ask': a.id,
+        on: { click: ev => openAskPop(a.id, ev.currentTarget.getBoundingClientRect()) },
+      },
+      el('span.n', {}, (i + 1) + '.'),
+      el('span.q', {}, rich(a.q)),
+      el('span.a', {}, a.state === 'answered' ? [rich(a.answer), a.why && el('small', {}, rich(a.why))] : a.state === 'left' ? 'Left to the asker' : 'Open')))));
+    }
+    // Where the clipboard is refused, the reply is shown to be copied by hand.
+    if (ui.reply && ui.reply.conv === state.id) {
+      box.append(el('textarea.reply', { readonly: true, rows: '6', 'aria-label': 'Your reply' }, ui.reply.text));
+    }
+    return box;
+  }
+
+  // Read all the answers together. The check is a thread of its own that
+  // hangs from the answer that asked, and checking again continues it.
+  function checkTogether() {
+    const sh = sheetNow();
+    if (!sh) return;
+    let th = checkThread(), focusId = null;
+    if (th && sh.checked === sh.rev) { showThread(th); return; }
+    if (offline()) { toast('Open this page inside Claude to check your answers.'); return; }
+    if (!sh.asks.some(a => a.state === 'answered')) { toast('Answer a question first.'); return; }
+    if (!th) {
+      th = newNode({ parent: sh.node, anchor: { start: FAR, end: FAR, text: 'Your answers', check: true }, q: 'Check my answers together', prompt: LLM.CHECK, ready: false });
+      runNode(th.id);
+    } else {
+      const end = N(tipOf(th.id));
+      if (busy(end)) { toast('The check is still being written.'); return; }
+      const m = newNode({ parent: end.id, q: 'Check them again', prompt: LLM.CHECK_AGAIN });
+      state.tips[th.id] = m.id;
+      focusId = m.id;
+      if (th.status === 'resolved') th.status = 'open';
+      runNode(m.id);
+    }
+    sh.checked = sh.rev;
+    showThread(th, focusId);
+  }
+
+  // The reply for the chat that asked, on the clipboard.
+  function copyReply() {
+    const sh = sheetNow();
+    if (!sh) return;
+    if (!sh.asks.some(a => a.state !== 'open')) { toast('Nothing is answered yet.'); return; }
+    const conv = state, text = LLM.replyText(sh);
+    sh.copied = sh.rev;
+    ui.reply = null;
+    render();
+    let done;
+    try { done = navigator.clipboard.writeText(text); } catch (e) { done = Promise.reject(e); }
+    done.then(
+      () => toast('Copied. Paste it into the chat that asked.'),
+      () => {
+        // Some views refuse the clipboard; then show the text, selected.
+        if (conv !== state) return;
+        ui.reply = { conv: conv.id, text };
+        renderPanes();
+        const ta = $('#panes .sheetbar .reply');
+        if (ta) { ta.focus({ preventScroll: true }); ta.select(); }
+        toast('Selected. Copy it with your keyboard.');
+      });
   }
 
   // ---------- glosses ----------
@@ -2257,16 +2554,17 @@
       const parts = [...t.children];
       const spans = parts.map(p => offs(t, p));
       const ks = anchoredKids(id).filter(k => k.raw);
+      const under = k => { const b = el('div.dbranch'); stitch(k.id, b); host.append(b); };
+      const put = new Set();
       parts.forEach((p, pi) => {
         const fig = p.classList.contains('figure');
         host.append(fig ? p : el('div.text.static', {}, p));
         ks.filter(k => (fig ? k.anchor.part && k.anchor.fig === +p.dataset.fig
-          : !k.anchor.part && k.anchor.start >= spans[pi].start && k.anchor.start < spans[pi].end)).forEach(k => {
-          const b = el('div.dbranch');
-          stitch(k.id, b);
-          host.append(b);
-        });
+          : !k.anchor.part && k.anchor.start >= spans[pi].start && k.anchor.start < spans[pi].end)).forEach(k => { put.add(k.id); under(k); });
       });
+      // A thread that hangs on no passage: a question whose words were not
+      // found in the text, and the check of the answers.
+      ks.filter(k => !put.has(k.id) && k.anchor.start >= FAR).forEach(under);
     } else {
       host.append(el('div.fine', {}, 'No answer yet.'));
     }
@@ -2318,7 +2616,7 @@
   // Pointing is the question: a click selects a sentence, a drag selects any span.
   document.addEventListener('mouseup', ev => {
     if (ev.button !== 0) return;
-    if ($('#pop').contains(ev.target) || $('#gloss').contains(ev.target)) return;
+    if ($('#pop').contains(ev.target) || $('#gloss').contains(ev.target) || ev.target.closest('.sheetbar')) return;
 
     const sel = getSelection();
     if (sel && !sel.isCollapsed && sel.rangeCount) {
@@ -2357,6 +2655,8 @@
     }
     const g = t.closest('.gloss');
     if (g) { showGloss(g, true); return; }
+    const aq = t.closest('.askq');
+    if (aq) { openAskPop(aq.dataset.ask, aq.getBoundingClientRect()); return; }
     const m = t.closest('mark[data-node]');
     if (m) { openBeside(colIndex(c), m.dataset.node); render(); return; }
     const s = t.closest('.sent');
@@ -2393,7 +2693,7 @@
     if (ev.key === 'Escape') { closePop(); hideGloss(); closeModal(); document.body.classList.remove('side-open'); return; }
     // Not for a key that something else has already acted on: Enter on a box
     // of a diagram opens the menu, and must not also choose from it.
-    if (!ui.pending || ev.defaultPrevented || /^(INPUT|TEXTAREA)$/.test(ev.target.tagName)) return;
+    if (!ui.pending || ui.pending.asked || ev.defaultPrevented || /^(INPUT|TEXTAREA)$/.test(ev.target.tagName)) return;
     if (ev.key === 'Enter') { ev.preventDefault(); ask(ui.pending, '', false); }
   });
 

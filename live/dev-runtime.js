@@ -25,6 +25,9 @@
 //   claude.deliver(data, id)   in the console: plays that conversation's Claude
 //                     writing a document to the inbox
 //   ?send=sample      a sample document arrives a moment after the page loads
+//   ?send=questions   one whose answer asks the reader three questions
+//   #offer            in the thread of such a question: the reply proposes an answer
+//                     ("What would you pick?" always does)
 //   ?missing=db       the page was published without the store: no inbox
 //   ?visitor          the viewer is not the owner of this copy: the inbox reads empty
 
@@ -59,6 +62,36 @@
         '@@@',
         'next: What did I leave out?',
       ].join('\n');
+    }
+
+    // The sheet the page adds to a question, when the conversation has one.
+    const sheet = /\(The app added this note\. The questions? your sent answer asks me[^]*\)\s*$/.exec(last);
+    const settled = sheet ? (sheet[0].match(/^ {3}(My answer: |Left to you\.)/gm) || []).length : 0;
+    if (/^Check my answers together/.test(q) || /^I have changed my answers/.test(q)) {
+      return [
+        `Placeholder check. The stand-in was shown ${settled} settled ${settled === 1 ? 'answer' : 'answers'} and cannot tell whether they fit together.`,
+        '',
+        /^I have changed/.test(q) ? 'A real check would say here which of its earlier points are now settled.' : 'A real check would name the answers that conflict, by their numbers.',
+        '',
+        '@@@',
+        'next: Which answer should I change?',
+      ].join('\n');
+    }
+    // A reply in the thread of a question the reader was asked.
+    const about = /^About this question you asked me: "(.*?)"\s/.exec(q);
+    const inAskThread = sheet && /This thread is about question \d+\./.test(sheet[0]);
+    if (about || inAskThread) {
+      const kind = /Why do you ask\?/.test(q) ? 'why' : /What would you pick\?/.test(q) ? 'pick' : /Help me answer it\./.test(q) ? 'help' : 'typed';
+      const said = {
+        why: 'Placeholder reason. A real answer would say what depends on your answer, and that it is inferring this from what was sent here.',
+        pick: 'Placeholder choice. A real answer would name the choices it sees and the one it would take.',
+        help: 'Placeholder help. A real answer would now ask you one easy question about your own situation. What do you use it for?',
+        typed: `Placeholder reply in the thread of a question. The stand-in was shown ${settled} settled ${settled === 1 ? 'answer' : 'answers'} on the sheet.`,
+      }[kind];
+      const out = [said, '', '@@@'];
+      if (kind === 'pick' || /#offer/.test(q)) out.push('answer: Placeholder answer from the stand-in', 'why: The stand-in proposes this so that the button can be tried.');
+      out.push('next: What would change your mind?');
+      return out.join('\n');
     }
 
     const passage = /^About (this (part|term|formula)|the symbol)/.test(q) || /^Still about the part/.test(q);
@@ -371,7 +404,31 @@
       'Halving the error takes four times the data. This relies on the draws being independent.',
     ].join('\n'),
   };
+  // An answer that asks the reader things, with the questions listed as the
+  // sending chat is asked to list them. The second leans on its sentence,
+  // and the quote of the third differs from the text in its markup.
+  const QUESTIONS = {
+    from: 'chat',
+    title: 'A monthly export of the readings',
+    context: 'You asked for a script that exports the sensor readings once a month, and we settled that it runs on the first of the month.',
+    question: 'Can you write the export now?',
+    answer: [
+      'I can, and most of it is decided. Three things are not, and they change what I write.',
+      '',
+      'The file can be CSV or a spreadsheet with formulas in it. Does the file need to open in a spreadsheet? If it does, I will write the totals as formulas, so that they follow when someone edits a row.',
+      '',
+      'It also matters who reads it. A file that leaves your team should not carry the device ids. Will it?',
+      '',
+      'Last, the timestamps. The readings are stored in **UTC**, and I can leave them so or convert them. Which do you want: `UTC` or local time?',
+    ].join('\n'),
+    questions: [
+      { quote: 'Does the file need to open in a spreadsheet?', question: 'Does the exported file need to open in a spreadsheet?' },
+      { quote: 'Will it?', question: 'Will the exported file be read by anyone outside your team?' },
+      { quote: 'Which do you want: `UTC` or local time?', question: 'Should the timestamps in the export be in UTC or in local time?' },
+    ],
+  };
   if (asked.get('send') === 'sample') setTimeout(() => deliver(SAMPLE, 'sample'), 1500);
+  if (asked.get('send') === 'questions') setTimeout(() => deliver(QUESTIONS, 'questions'), 1500);
 
   const caps = {
     sample,

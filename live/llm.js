@@ -53,6 +53,54 @@ const LLM = (() => {
   const backPrompt = (subject, text) => `I will now explain ${subject} back in my own words, so that you can check my understanding. Compare it with what you told me above. Reply in three short paragraphs, each starting with its label in bold: "**Right:**" for what I have right, "**Off or missing:**" for what is wrong or missing (or "nothing important"), and "**Check yourself:**" for one question that tests my weakest point, which I may answer in my next message. Be specific and brief, with no diagram.\n\nMy explanation:\n${text}`;
   const PLAIN = `\n\n(For this reply only: plain text, with no ${SEP} section.)`;
 
+  // ---------- the questions a sent answer asks ----------
+  // An answer that was sent here from another chat may ask the reader
+  // questions, and the chat that sent it lists them (see "the inbox"). The
+  // reader answers them one at a time, each in a thread of its own if they
+  // want help, and the answers are kept on one sheet for the conversation
+  // (`sheet` in app.js). Claude here did not ask those questions: what it
+  // says about them it infers from what was sent.
+
+  // The one-click helps with a question. `q` is what the reader sees, `ask`
+  // what Claude is asked.
+  const HELPS = {
+    why: { q: 'Why do you ask?', ask: 'Why do you ask? Say what depends on my answer, and what you would do differently for each likely answer. Where you are inferring this from what was sent here, say so.' },
+    pick: { q: 'What would you pick?', ask: 'What would you pick? Name the choices you see, the one you would take with what you know now, and what would change your mind.' },
+    help: { q: 'Help me answer', ask: 'Help me answer it. Ask me one easy question at a time about my own situation, in words I would use, and propose an answer once you can.' },
+  };
+  const helpPrompt = (question, kind) => `About this question you asked me: "${question}"\n\n${HELPS[kind].ask}${WORDED}`;
+  // The answers read together, before they go back to the chat that asked.
+  const CHECK = 'Check my answers together before I send them back. Name any that conflict with each other, by their numbers, and say in a sentence what the conflict is. Name any that cannot be understood without the thread where I worked it out. Do not reopen an answer for any other reason. If they fit together, say so in one sentence. No diagram.' + WORDED;
+  const CHECK_AGAIN = 'I have changed my answers. Check them together again in the same way, and say which of the points you raised before are now settled.' + WORDED;
+
+  const oneLine = (v, n) => clip(String(v || '').replace(/\s+/g, ' ').trim(), n);
+  // The sheet as Claude is told it: every question with the reader's answer
+  // so far. It is added to the turn being asked and not kept in it, so each
+  // thread works from the answers as they stand now, whatever it said
+  // before. `about` is the id of the question a thread is about.
+  function sheetNote(sheet, about) {
+    const asks = (sheet && sheet.asks) || [];
+    if (!asks.length) return '';
+    const lines = asks.map((a, i) => `${i + 1}. ${oneLine(a.q, 600)}\n   `
+      + (a.state === 'answered' ? `My answer: ${oneLine(a.answer, 2000)}${a.why ? '\n   Why: ' + oneLine(a.why, 1000) : ''}`
+        : a.state === 'left' ? 'Left to you.' : 'Not answered yet.'));
+    const at = asks.findIndex(a => a.id === about);
+    return `\n\n(The app added this note. ${asks.length === 1 ? 'The question your sent answer asks me, and my answer so far' : 'The questions your sent answer asks me, and my answers so far'}:\n${lines.join('\n')}`
+      + (at >= 0 ? `\nThis thread is about question ${at + 1}.` : '') + ')';
+  }
+
+  // The reply the reader takes back to the chat that asked: every question
+  // with its answer and, in brackets, the reason. No call to Claude.
+  function replyText(sheet) {
+    const asks = (sheet && sheet.asks) || [];
+    const num = a => asks.indexOf(a) + 1;
+    const done = asks.filter(a => a.state !== 'open'), open = asks.filter(a => a.state === 'open');
+    const out = done.map(a => `${num(a)}. ${oneLine(a.q, 600)}\n   `
+      + (a.state === 'left' ? 'Your call.' : oneLine(a.answer, 2000) + (a.why ? `\n   (${oneLine(a.why, 1000)})` : '')));
+    if (open.length) out.push((done.length ? '\n' : '') + 'Not answered yet:', ...open.map(a => `${num(a)}. ${oneLine(a.q, 600)}`));
+    return out.join('\n') + '\n';
+  }
+
   // ---------- runtime ----------
 
   // state: 'starting' until the runtime has answered, then 'ready' or 'none'.
@@ -186,7 +234,9 @@ const LLM = (() => {
   //   context   or, for a long conversation, a summary of what came before
   //   title     a title for the conversation
   //   from      where it was sent from
-  // -> { title, from, turns: [{ q, noq, prompt, raw }] }
+  //   questions the questions `answer` asks the reader: [{ quote, question }]
+  // -> { title, from, turns: [{ q, noq, prompt, raw }], asks: [{ quote, q }] }
+  // `asks` is there only when a question was listed.
   // `prompt` is what Claude is given as the person's turn. The first one says
   // that the answers were written elsewhere: they have no @@@ section and
   // may have headings and tables, and Claude would otherwise carry on so.
@@ -211,7 +261,14 @@ const LLM = (() => {
     // Without a title or a question, the answer's first line names it.
     const opening = answer.split('\n').find(l => l.trim()).replace(/^[\s#>*-]+|[*_`]+/g, '').trim();
     const title = clip((words(data.title) || pairs[0].q || pairs[k - 1].q || opening || 'An answer sent from Claude').replace(/\s+/g, ' '), 90);
-    return { title, from: clip(words(data.from), 40), turns };
+    const out = { title, from: clip(words(data.from), 40), turns };
+    // `quote` is where the answer asks it, `question` what it asks, said so
+    // that it can be read alone. One without its question is left out.
+    const asks = (Array.isArray(data.questions) ? data.questions : [])
+      .map(x => (x && typeof x === 'object' ? { quote: clip(words(x.quote), 2000), q: clip(words(x.question).replace(/\s+/g, ' '), 600) } : null))
+      .filter(x => x && x.q).slice(0, 40);
+    if (asks.length) out.asks = asks;
+    return out;
   }
 
   // ---------- what Claude is told ----------
@@ -233,6 +290,11 @@ const LLM = (() => {
       '- The conversation is a tree. The person can go back to any earlier message and continue from there, so what you see here is exactly the path that leads to the current question and nothing else.',
       '- They can point at any sentence or phrase in one of your answers and ask about just that part. Such a question arrives with the part quoted, and its answer opens beside the original message.',
       '- Terms you list at the end of an answer get a dotted underline, and hovering shows your one-line definition.',
+    ];
+    if (o.sheet) {
+      lines.push('- The answer that was sent here asks this person questions. They are working out their answers one at a time, to take back to the chat that asked. A note at the end of their message lists those questions and the answers so far. Treat an answer there as decided unless they reopen it, and go by the note where it differs from what you said earlier.');
+    }
+    lines.push(
       '',
       'How to answer:',
       '- Answer the question that was asked, directly, in the first sentence or two. Then give the reasoning that makes it make sense.',
@@ -246,8 +308,7 @@ const LLM = (() => {
       '- If you are not sure of something, say so in the sentence where it matters.',
       '- Reply in the language the person writes in. A question asked with a button is worded by the app, in English whatever the person\'s language, and says so in brackets at its end. Its English tells you nothing about the person\'s language: answer it in the language of the answer it is about.',
       // Claude has no clock, and takes the year its knowledge ends for the present.
-      `- Today is ${dateWords(o.today || new Date())}. Your knowledge stops some time before today, so the latest thing you know of may not be the latest there is. When a question is about what is current or recent, go by today's date, and say how far your knowledge goes.`,
-    ];
+      `- Today is ${dateWords(o.today || new Date())}. Your knowledge stops some time before today, so the latest thing you know of may not be the latest there is. When a question is about what is current or recent, go by today's date, and say how far your knowledge goes.`);
     if (o.notion) {
       lines.push('- You can look in this person\'s Notion with notion_search and notion_fetch. Use them when the question is about their own notes, documents, projects or team, or when they ask you to. Call them without announcing it, read what you need, then write the answer. A long page comes in numbered parts: read the parts the question needs before you answer, and if you leave any unread, say which. For general knowledge, answer without them.');
     }
@@ -266,8 +327,11 @@ const LLM = (() => {
       '',
       `After every answer, however short, add a line containing only ${SEP} and then the lines below. This holds just as much for an answer about a quoted part, a formula, a symbol or a part of a diagram.`,
       `- for each term in your answer that this reader may not know, one line of the form "term: <the term exactly as it appears in your answer> = <a one-sentence plain definition>". At most ${o.level === 2 ? 4 : 6}; none is fine. A term you defined earlier in this conversation keeps its definition in the app, so list only the terms that are new in this answer.${known.length ? ' They already know these, so never list them: ' + known.join(', ') + '.' : ''}`,
-      '- up to three lines of the form "next: <a question this person would naturally ask next>", each under twelve words.',
-      'Write nothing after those lines.');
+      '- up to three lines of the form "next: <a question this person would naturally ask next>", each under twelve words.');
+    if (o.sheet && o.about) {
+      lines.push('- This thread is about one question you asked the reader; the note says which. Most replies here only explain or ask. Propose an answer only when it fits: when they ask what you would pick, or when what they have told you settles it. Then add two more lines: "answer: <the answer, written so that it can be understood without this thread>" and "why: <one or two sentences of reason>". Never more than one proposal in a reply.');
+    }
+    lines.push('Write nothing after those lines.');
     return lines.join('\n');
   }
 
@@ -338,7 +402,7 @@ const LLM = (() => {
         turns.push({ role: 'user', content: h.prompt + refs(h.sources, o, i < brief) });
         if (h.raw) turns.push({ role: 'assistant', content: h.raw });
       });
-      turns.push({ role: 'user', content: o.prompt });
+      turns.push({ role: 'user', content: o.prompt + sheetNote(o.sheet, o.about) });
       if (turns.reduce((a, t) => a + bytes(t.content), 0) <= cap) return turns;
       if (brief < hist.length) brief++;
       else if (drop < hist.length - 1) drop++;
@@ -804,7 +868,10 @@ const LLM = (() => {
 
   // ---------- reading an answer ----------
 
-  // raw -> { text, terms: [{term, gloss}], next: [question] }
+  // raw -> { text, terms: [{term, gloss}], next: [question] }, and also
+  // offer: { text, why } when the answer proposes an answer to a question
+  // the reader was asked (see "the questions a sent answer asks"). That is
+  // read only under the separator: "Answer: 42" may end any answer.
   const memo = new Map();
   function parse(raw) {
     raw = String(raw || '');
@@ -826,8 +893,15 @@ const LLM = (() => {
         cut = last && SEP.startsWith(last) ? lines.length - 1 : lines.length;
       }
     }
-    const terms = [], next = [];
+    const terms = [], next = [], offer = {};
+    const sep = cut < lines.length && lines[cut].trim() === SEP;
     tail.forEach(l => {
+      const p = sep && /^\s*[-*]?\s*(answer|why)\s*:\s*(.+?)\s*$/i.exec(l);
+      if (p) {
+        const key = p[1].toLowerCase() === 'why' ? 'why' : 'text';
+        if (!offer[key]) offer[key] = p[2].replace(/^<(.*)>$/, '$1').trim();
+        return;
+      }
       const m = meta(l);
       if (!m) return;
       const body = m[2].replace(/^<(.*)>$/, '$1');
@@ -840,6 +914,7 @@ const LLM = (() => {
       if (term && gloss && !terms.some(t => t.term.toLowerCase() === term.toLowerCase())) terms.push({ term, gloss: gloss.charAt(0).toUpperCase() + gloss.slice(1) });
     });
     const out = { text: lines.slice(0, cut).join('\n').replace(/\s+$/, ''), terms, next: next.slice(0, 3) };
+    if (offer.text) out.offer = { text: offer.text, why: offer.why || '' };
     if (memo.size > 400) memo.clear();
     memo.set(raw, out);
     return out;
@@ -876,6 +951,7 @@ const LLM = (() => {
     ask, side, parse, partSpan,
     inbox, discard, fromInbox, summaryIn,
     passagePrompt, askPrompt, partPrompt, formulaPrompt, symbolPrompt, termPrompt, followPrompt, backPrompt, DRAW, WORDED,
+    HELPS, helpPrompt, CHECK, CHECK_AGAIN, sheetNote, replyText,
     errorText, isFinal: code => FINAL.has(code),
   };
 })();

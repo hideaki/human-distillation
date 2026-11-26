@@ -52,12 +52,15 @@ in step when a feature is added or the way to publish changes.
   `#math`, `#slow`, `#long`, `#error`, `#refuse`, `#deny`, "notion" and `#web`
   (with `#parts` or `#skim` for a long page, read whole or only its start).
   `?missing=web` or `?missing=notion` in the page's address plays a viewer
-  who has not added that connector. For the inbox: `?send=sample` has a
+  who has not added that connector. For the inbox: `?send=questions` has a
+  sample answer arrive that asks the reader three questions (in a question's
+  thread, "What would you pick?" or `#offer` makes the stand-in propose an
+  answer), `?send=sample` has a
   sample answer arrive, `claude.deliver({...})` in the console sends any
   other, `?missing=db` is a copy published without the store, and `?visitor`
   a viewer who is not the owner.
 - Tests: `npm test` runs the parsing tests, the Notion tests, the web tests,
-  the inbox tests and the static check. The flow
+  the inbox tests, the sheet tests and the static check. The flow
   tests run in the Browser pane at `/test`. `live/TESTING.md` explains all
   three, including the grid (every per-thread action in every kind of thread).
 - Publish: the app lives as two Claude artifacts in the author's Claude
@@ -145,6 +148,23 @@ uses the user's existing connections with no sign-in of its own.
   (`summaryBox`). `store.taken` keeps a document from being opened
   twice in one browser. The document stays in the store until its
   conversation is deleted.
+- The sheet: a sent document may list the questions its answer asks the
+  reader (`questions`: `quote` and `question`). They become `state.sheet`,
+  one per conversation: `{ rev, checked, copied, node, asks }`. `findQuote`
+  places each quote in the drawn text, by its letters and digits where the
+  markup differs. Only the reader's actions write to the sheet (`settle`).
+  The three helps (`LLM.HELPS`) and "Check them together" (`LLM.CHECK`) are
+  worded by the page and end with `WORDED`. Every question of the
+  conversation is sent with `LLM.sheetNote`, added to the turn being asked
+  in `turnsFor` and never kept in a turn's `prompt`, so a thread always goes
+  by the answers as they stand. In a question's thread `rules()` allows a
+  proposal: `answer:` and `why:` under the `@@@`, read by `LLM.parse` as
+  `offer` only below the separator, since "Answer: 42" may end any answer.
+  Claude here did not ask the questions: the "why" prompt tells it to say
+  when it infers. "Copy reply" is `LLM.replyText`, with no call. The design
+  and what was decided against (marking assumptions, reasons from the
+  sender, marks on answers that have gone stale, "Answer this" by hand) are
+  in the memory note about questions from AI.
 - Only the artifact's owner can use the inbox: the rule says so, and the
   store refuses a write from an outside visitor whatever the rule. So it
   works on a person's own copy and never on a copy they were given a link
@@ -161,7 +181,12 @@ uses the user's existing connections with no sign-in of its own.
 - Data: `store` holds every conversation in `localStorage` under
   `human-distillation-live-v1`. A conversation is a tree of `nodes` (one per
   question and its answer), plus `cols`, the threads on screen left to right.
-- A side thread is a node with an `anchor`. Four shapes:
+- A side thread is a node with an `anchor`. Six shapes, the last two only
+  in a conversation that was sent with questions (see "the sheet" above):
+  `{..., ask}` the thread of a question, whose `text` is the question, and
+  `{..., check: true}` the check of the answers. Neither draws a mark in the
+  text, and one with no passage has `start` past the end of the answer
+  (`FAR`). The other four:
   `{start, end, text}` a passage; `{..., math: true}` a formula;
   `{..., math: true, sym}` a symbol in a formula; `{..., fig, part}` a part of
   a diagram. `start` and `end` are character offsets into the answer's

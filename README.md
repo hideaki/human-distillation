@@ -89,6 +89,11 @@ an answer loses you, which happens a lot with hard material.
   or with a summary of the chat so far. It opens as a new conversation, and
   every part of it can be asked about. See
   [Send an answer from another chat](#send-an-answer-from-another-chat).
+- **Questions another chat asked you.** When that answer asks you several
+  things at once, the page marks each question where it stands. You answer
+  them one at a time, with Claude's help where you want it, and copy one
+  reply back. See
+  [Answer what another chat asked you](#answer-what-another-chat-asked-you).
 - **A map.** The sidebar shows the tree, with what is open, queued and
   resolved, and a button to the next open question.
 - **Write it up.** Turns the whole tree into one document.
@@ -235,6 +240,39 @@ A few things about it:
   stays in the one browser, like any conversation of the page.
 - **Without a browser.** The page does not have to be open when the answer
   is sent.
+
+### Answer what another chat asked you
+
+A chat often ends an answer with several questions at once: decisions it
+needs from you before it goes on. Sent to the page, such an answer arrives
+with its questions marked, and you can settle them one at a time.
+
+- **The marks.** Each question is highlighted where it stands in the text.
+  A click opens its menu: a box for your answer and one for your reason,
+  three helps, and "Your call", which leaves the decision to the chat that
+  asked.
+- **The helps.** "Why do you ask?", "What would you pick?" and "Help me
+  answer" open a side thread on that one question. Claude in the page did
+  not ask the question. What it says about it is inferred from what was
+  sent, and it is asked to say so.
+- **A proposed answer.** When a reply in that thread arrives at an answer,
+  it ends with the answer, a short reason and "Use as my answer". Nothing
+  joins your answers until you press that or type your own.
+- **The sheet.** Your answers are kept together in a strip above the
+  message box: "3 questions for you, 1 settled". Every question you ask
+  Claude in that conversation is sent with the answers as they stand, so
+  each thread knows what the others settled.
+- **Check them together.** Opens one more thread, in which Claude reads all
+  your answers with their reasons and names any that conflict. Checking
+  again after a change continues that thread.
+- **Copy reply.** Puts the questions with your answers and reasons on the
+  clipboard, for pasting into the chat that asked. Questions still open are
+  listed as not answered yet.
+
+For this the sending chat lists the questions its answer asks, which the
+note at the top of the page tells it to do. An answer sent without that list
+is an ordinary sent answer. Your answers stay in the one browser, like any
+conversation of the page.
 
 ### Good to know
 
@@ -443,6 +481,7 @@ A document of the inbox has these fields. Only `answer` is required:
 | `context` | In place of `earlier`, for a long chat: a summary of what was said before |
 | `title` | A title for the conversation. Without one, the first question names it |
 | `from` | Where it was sent from |
+| `questions` | The questions `answer` asks the reader: a list of `{ "quote", "question" }`. `quote` is the words of the answer where it is asked, `question` the same question said so that it stands alone |
 
 The sent turns reach Claude as its own earlier answers, on the path like any
 other turn. The first of them carries a note from the app: that these
@@ -452,6 +491,16 @@ turn. A document may be 256 KiB, and it stays in the store until its
 conversation is deleted in the page, so that the owner's other browsers
 open it too. Each browser keeps the ids it has opened, and opens a document
 once.
+
+The questions a document lists become the conversation's sheet (`sheet` on
+the conversation, in `app.js`): one entry per question, with the reader's
+answer, reason and state. The page finds each `quote` in the drawn text and
+marks it. Only the reader's own actions write to the sheet. Claude's reply
+in a question's thread may end with `answer:` and `why:` lines under the
+`@@@`, which the page shows as a proposal with a button. Every question
+asked in that conversation is sent with the sheet as it stands, added to
+the turn being asked and not kept in it, so no thread goes by an answer
+that has since changed.
 
 This describes the runtime as it was in November 2026. It is Claude's, not
 this project's, and it may change.
@@ -516,7 +565,9 @@ flowchart TD
 A conversation is a set of nodes, one per question and its answer. Each node
 names its parent. A node that was asked by pointing also has an `anchor`: the
 character offsets of the passage in the parent's rendered answer, and whether
-it is a passage, a formula, a symbol or a part of a diagram. A node with an
+it is a passage, a formula, a symbol or a part of a diagram. In a
+conversation that was sent with questions, an anchor may also name one of
+those questions, or be the check of the reader's answers. A node with an
 anchor opens as a thread beside its parent; one without continues the thread
 below it. Nothing else distinguishes them, and no branch is the main one.
 
@@ -650,11 +701,14 @@ The inbox has a stand-in too, a store kept in the browser:
 | In the page's address | What it plays |
 | --- | --- |
 | `?send=sample` | a sample answer, with a summary, arrives a moment after the page loads |
+| `?send=questions` | a sample answer that asks the reader three questions |
 | `?missing=db` | a copy published without the store: no inbox |
 | `?visitor` | a viewer who is not the owner of the copy: the inbox reads empty |
 
 `claude.deliver({ answer: "…" })` in the browser's console sends any other
-document, as a Claude chat would.
+document, as a Claude chat would. In the thread of a question, "What would
+you pick?" makes the stand-in propose an answer, and so does `#offer` in a
+typed message.
 
 ## Tests
 
@@ -663,13 +717,15 @@ npm test
 ```
 
 This runs the parsing tests, the Notion tests, the web tests, the inbox
-tests and a static check (ESLint, if one is installed; skipped otherwise).
+tests, the sheet tests and a static check (ESLint, if one is installed;
+skipped otherwise).
 It needs Node and installs nothing.
 
 The flow tests click through the real page against the stand-in. They run in
 a browser: start the preview server and open http://localhost:4174/test. A
-full run takes about three minutes. Every action a thread offers is run in
-every kind of thread (main, passage, formula, symbol, diagram part).
+full run takes a few minutes. Every action a thread offers is run in
+every kind of thread (main, passage, formula, symbol, diagram part, a
+question of a sent answer, the check of the answers).
 
 [live/TESTING.md](live/TESTING.md) has the details.
 

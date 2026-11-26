@@ -17,6 +17,15 @@ a new conversation as soon as it arrives. The document's fields:
               what was said before, a few paragraphs at most.
   "title"     A short title for the conversation.
   "from"      Where it was sent from, for example "chat".
+  "questions" The questions "answer" asks the person, in the order they
+              appear, as a list of {"quote": "...", "question": "..."}.
+              "quote" is the words of "answer" where the question is asked,
+              copied exactly as you wrote them in "answer". "question" is
+              the same question, written so that it can be understood alone.
+              List only what the answer asks outright: no rhetorical
+              question, no offer to say more, no assumption you stated. The
+              page marks each one, and the person answers them there one at
+              a time and brings the answers back to you.
 
 The text is Markdown. Do not shorten, summarise or reword an answer. One thing
 may change: write every formula and mathematical symbol in LaTeX, $...$ inside

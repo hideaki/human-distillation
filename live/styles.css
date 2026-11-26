@@ -480,7 +480,7 @@ mark.resolved.last::after { content: "✓"; color: var(--done-line); }
 .askq.left.last::after { content: "→"; color: var(--muted); }
 
 /* its menu: the ask menu, set in rows */
-#pop.askpop { flex-direction: column; align-items: stretch; gap: 6px; padding: 10px; width: min(460px, calc(100vw - 16px)); }
+#pop.askpop { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 6px; padding: 10px; width: min(460px, calc(100vw - 16px)); }
 #pop.askpop .q { font: 15px/1.45 var(--read); padding: 0 2px 2px; }
 #pop.askpop .line { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 #pop.askpop .line input { flex: 1 1 200px; }

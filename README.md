@@ -521,6 +521,12 @@ asked in that conversation is sent with the sheet as it stands, added to
 the turn being asked and not kept in it, so no thread goes by an answer
 that has since changed.
 
+The first reply in the thread of a question is drawn under the question
+itself, which the page keeps on that turn (`lead`). The question is not
+part of what Claude wrote there and is not sent as such. A side thread on
+words of it is anchored like one on any passage, and its prompt says the
+words are from the question, not from Claude's answer.
+
 This describes the runtime as it was in November 2026. It is Claude's, not
 this project's, and it may change.
 

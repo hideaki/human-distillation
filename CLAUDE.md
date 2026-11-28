@@ -40,6 +40,8 @@ in step when a feature is added or the way to publish changes.
                           scenes are a later take in a smaller window, and
                           a little larger. The README's caption keeps to
                           one line and leaves these details to this file.
+                          Also `design-questions.md`: why the questions
+                          feature has its shape (see the working rules).
     index.html, app.js, content.js, styles.css (in the root)
                           the first mock, with canned content. Superseded; leave it.
 
@@ -189,7 +191,7 @@ uses the user's existing connections with no sign-in of its own.
   when it infers. "Copy reply" is `LLM.replyText`, with no call. The design
   and what was decided against (marking assumptions, reasons from the
   sender, marks on answers that have gone stale, "Answer this" by hand) are
-  in the memory note about questions from AI.
+  in `docs/design-questions.md`.
 - Only the artifact's owner can use the inbox: the rule says so, and the
   store refuses a write from an outside visitor whatever the rule. So it
   works on a person's own copy and never on a copy they were given a link
@@ -273,6 +275,13 @@ uses the user's existing connections with no sign-in of its own.
   is merged into `main` when the user says so. The repository is public on
   GitHub (`origin`, github.com/hideaki/human-distillation): push only when
   the user asks, each time, and only `main`.
+- `docs/design-questions.md` says why the questions feature has its shape,
+  and this file says how the code does it. Neither repeats the other. The
+  doc's text down to "Open questions" is the design of 25 November 2026 and
+  is not edited. A change that adds or reverses a decision about the
+  feature gets a dated entry under "Decisions since", in the same commit:
+  what was decided and what prompted it, with no function or field names,
+  which belong here.
 - Nothing private goes into a tracked file or a commit message: no key, no
   address of the user's, nothing read in their Notion. Fixtures and the
   stand-in use made-up pages.

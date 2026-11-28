@@ -290,6 +290,9 @@ and the recommendation it had given. An answer sent without that list is an
 ordinary sent answer. Your answers stay in the one browser, like any
 conversation of the page.
 
+Why it has this shape, what was decided against, and what each real try
+changed is in [docs/design-questions.md](docs/design-questions.md).
+
 ### Good to know
 
 - **Where conversations live.** In the browser's `localStorage`, for that
@@ -768,7 +771,9 @@ question of a sent answer, the check of the answers).
       dev.py              the local preview server
       build.py            writes the one file that is published
       test/, TESTING.md   the tests
-    docs/                 the demo recording and the screenshots above
+    docs/                 the demo recording and the screenshots above, and
+                          design-questions.md: the design of the questions
+                          feature and the decisions made since
     index.html, app.js, content.js, styles.css
                           the first mock, with canned content and no model.
                           Superseded, and kept for the record.

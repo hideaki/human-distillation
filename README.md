@@ -24,8 +24,10 @@ AI.
 cut short. Also available as [MP4](docs/demo.mp4).*
 
 **Try it now:** [open it in Claude](https://claude.ai/artifact/DT4Eotmtno3AZhJtxc7fA5). It opens
-on a worked example. A question of your own is answered by Claude on your own
-account, so it needs one and counts against your usage.
+on a worked example, which you can read as it is. To ask a question of your
+own, first duplicate the artifact in Claude: on the shared copy the Send
+button stays grey for a visitor. Your copy's questions are answered by Claude
+on your own account, so it needs one and counts against your usage.
 
 ## What it is
 
@@ -106,9 +108,16 @@ an answer loses you, which happens a lot with hard material.
 
 The app runs as a Claude artifact, and that is the one way to use it for
 real: the answers come from Claude, on your own account. The link under the
-[demo](#demo) opens a shared copy. To have one of your own, publish it as
-described below. Sending an answer in from another chat works only on a
-copy of your own.
+[demo](#demo) opens a shared copy. A visitor can read it, but cannot ask on
+it: the message box stays grey (seen in the Claude desktop app, with a
+visitor on their own account). There are two ways to a copy of your own:
+
+- **Duplicate the shared copy** in Claude. That is enough to ask questions.
+  It stays as it was when you duplicated it, and it cannot be sent an answer
+  from another chat, because the shared copy is published without the store
+  that needs.
+- **Publish it yourself**, as described below. This is the one way to a copy
+  that can be sent an answer from another chat.
 
 It has no server and no API key. It is one HTML file that Claude hosts
 as an artifact, a page on claude.ai that is private until you share it. The
@@ -122,8 +131,8 @@ page uses the runtime Claude gives a page it hosts:
   page uses one collection of it, `inbox`, where a Claude chat of the
   artifact's owner can leave an answer for the page to open.
 
-So whoever opens the page uses their own Claude, their own Notion and their
-own web search, and the app has no sign-in of its own.
+So the page runs on the Claude, the Notion and the web search of the person
+using it, and the app has no sign-in of its own.
 
 ### Publish your own copy
 
@@ -233,7 +242,8 @@ A few things about it:
   have neither.
 - **Not on the shared copy.** Only the owner of an artifact can write to its
   store, so nobody can send an answer to a copy they were only given a link
-  to. This is why you need your own.
+  to. The shared copy is also published without the store, so a duplicate of
+  it has none. This is why you need to publish your own.
 - **Where the document stays.** In the artifact's store on Claude's side,
   readable by you alone, until you delete the conversation in the page. Your
   other browsers and devices open it from there too. What you ask after that
@@ -303,9 +313,12 @@ changed is in [docs/design-questions.md](docs/design-questions.md).
   artifact's store as described above.
 - **What Claude sees.** Each question is sent with the turns on the path that
   leads to it, and with nothing from other branches or other conversations.
-- **Sharing.** Someone you share the artifact with asks on their own Claude
-  account, reads their own Notion, searches through their own connector and
-  keeps their own conversations. They see none of yours.
+- **Sharing.** Someone you share the artifact with sees none of your
+  conversations, which are in your browser. They can read the worked
+  example. In the one case seen, a visitor on another account in the Claude
+  desktop app, they could not ask until they duplicated the artifact. A
+  duplicate is their own copy: its questions run on their Claude account and
+  their connectors, and its conversations stay in their browser.
 - **What a search sends out.** With "Search the web" ticked, the queries
   Claude writes go to Parallel Search, and a page is fetched through it.
   Claude may read only an address that you, a search result or a page it
@@ -409,7 +422,8 @@ const sample = await window.claude.use("sample");
 `use(name)` asks for one capability by name and gives a promise. The promise
 resolves to the capability, or to `null` when this view cannot offer it: the
 artifact did not declare it when it was published, or the viewer's account
-or app does not have it. Asking costs nothing and shows the viewer nothing.
+or app does not have it. A visitor to someone else's copy has been seen to
+get `null` for `sample`. Asking costs nothing and shows the viewer nothing.
 `llm.js` asks for `sample` and `mcp` once, when the page loads, and the page
 shows a bar under its header if Claude is not there.
 

@@ -197,6 +197,10 @@ uses the user's existing connections with no sign-in of its own.
   works on a person's own copy and never on a copy they were given a link
   to. `rt.inbox` is false for a viewer who is not the owner (`isOwner()`
   needs no declared capability).
+- A visitor to someone else's copy may get no `sample`: seen once, on the
+  shared copy in the Claude desktop app, where Send stayed grey until the
+  visitor duplicated the artifact. The page treats it like any view without
+  Claude (`rt.state` is `'none'`, `offline()` in `app.js`).
 - A connector the viewer has not added: `connectors()` asks the runtime for
   the list at load (listing never prompts) and `rt.missing` records what is
   absent. That lookup is then not lent to Claude, and the message box shows

@@ -337,6 +337,14 @@
     return grab;
   }
 
+  // Every thread on screen is made of its parts and nothing else: no stray
+  // text between them, as a value that is not an element leaves when it is
+  // appended ("false", "null").
+  function tidy(what) {
+    const stray = $$('#panes .pane').flatMap(p => [...p.childNodes].filter(n => n.nodeType !== 1).map(n => show(n.nodeValue)));
+    ok(!stray.length, `${what}: stray text in a thread: ${stray.join(', ')}`);
+  }
+
   function noSideways(what) {
     const de = doc.documentElement;
     ok(de.scrollWidth <= de.clientWidth, `${what}: the page is ${de.scrollWidth}px wide in a ${de.clientWidth}px window`);
@@ -355,7 +363,68 @@
   const NEXT = ['What would a real answer look like?', 'Show the same thing with #long', 'What happens on an #error?'];
   const SIDE_REPLY = 'Placeholder answer about the part you pointed at.';
 
-  // The five kinds of thread. `open` makes one from the first answer.
+  // A document sent to the page whose answer asks the reader four questions,
+  // and what the tests do with them. The fourth quote is not in the answer.
+  const QDOC = {
+    title: 'A monthly export',
+    question: 'Can you write the export now?',
+    answer: [
+      'I can. Three things change what I write.',
+      '',
+      'Does the file need to open in a spreadsheet? If it does, the totals become formulas.',
+      '',
+      'A file that leaves your team should not carry the device ids. Will it?',
+      '',
+      'The readings are stored in **UTC**. Which do you want: `UTC` or local time?',
+    ].join('\n'),
+    questions: [
+      { quote: 'Does the file need to open in a spreadsheet?', question: 'Does the exported file need to open in a spreadsheet?' },
+      { quote: 'Will it?', question: 'Will the exported file be read by anyone outside your team?' },
+      { quote: 'Which do you want: `UTC` or local time?', question: 'Should the timestamps be in UTC or in local time?' },
+      { quote: 'These words are not in the answer', question: 'How many months should one file hold?' },
+    ],
+  };
+  const Q = QDOC.questions.map(x => x.question);
+  const qsheet = () => conv().sheet;
+  const entry = i => qsheet().asks[i - 1];
+  const qmark = i => $(`.askq[data-ask="q${i}"]`, mainText());
+  const strip = () => $('.sheetbar', pane('root'));
+  const stripLine = () => txt($('.fold', strip()));
+  const stripNote = () => txt($('.note', strip()));
+  const qrows = () => $$('.qrow', strip()).map(r => [txt($('.n', r)), txt($('.q', r)), txt($('.a', r))]);
+  const askMenu = () => until(() => $('#pop.show.askpop'), 'the menu of the question', 5000);
+  const NOTE_HEAD = '(The app added this note. The questions your sent answer asks me, and my answers so far:';
+  const OFFER_RULE = 'You may propose an answer to any question in the note, from any thread.';
+
+  async function sentWithQuestions(o) {
+    await load({ ...o, inbox: { q: QDOC } });
+    await until(() => conv().inbox === 'q' && mainText() && strip(), 'the document to open, with its questions');
+  }
+  // Type an answer in the menu of question i.
+  async function answerIn(i, text, why) {
+    await click(qmark(i), `question ${i}`);
+    await askMenu();
+    type($('#pop-q'), text);
+    if (why != null) type($('#pop-why'), why);
+    key($('#pop-q'), 'Enter');
+    await until(() => !pop() && entry(i).answer === text, `the answer to question ${i} to be kept`);
+  }
+  // Ask for help from the menu of question i: its one button.
+  async function helpFrom(i) {
+    await click(qmark(i), `question ${i}`);
+    const before = ids();
+    await click(button(await askMenu(), 'Help me answer'), '"Help me answer"');
+    const id = await fresh(before, 'the help to be asked');
+    await answered(id);
+    return id;
+  }
+
+  // The kinds of thread. `open` makes one from the first answer. The last two
+  // hang from an answer that was sent to the page (`sent`): the thread of a
+  // question it asks, and the check of the reader's answers. They say what
+  // differs there: the conversation's title and first answer, what the thread
+  // opens with (`dq`) and is answered (`reply`), its chips, and how it is
+  // found again once it is folded away, since it has no mark of its own.
   const KINDS = {
     main: { label: 'Main thread', box: 'Ask a follow-up…' },
     passage: {
@@ -379,6 +448,33 @@
       open: async () => { await click(figPart(mainText(), 'n:question'), 'the box "Question"'); return explain(); },
       mark: () => figPart(mainText(), 'n:question'),
     },
+    question: {
+      label: 'Question thread', box: 'Ask more about this question…', about: Q[0], sent: true,
+      open: () => helpFrom(1),
+      mark: () => qmark(1),
+      dq: 'Help me answer', reply: 'Placeholder help.', typed: 'Placeholder reply in the thread of a question.',
+      chips: ['Why do you ask?', 'What would you pick?', 'What would change your mind?', 'Show this as a diagram'],
+      oneClick: { label: 'Why do you ask?', help: 'why', asks: 'Why do you ask? Say what depends on my answer', reply: 'Placeholder reason.' },
+      next: 'What would change your mind?',
+      head: `“${Q[0]}”`, above: 'Does the file need to open in a spreadsheet?',
+      reopen: async () => { await click(qmark(1), 'the question'); await click(button(await askMenu(), 'Open the thread'), '"Open the thread"'); },
+    },
+    check: {
+      label: 'Check thread', box: 'Ask about the check…', about: 'Your answers', sent: true,
+      open: async () => {
+        await answerIn(1, 'Yes');
+        const before = ids();
+        await click(button(strip(), 'Check them together'), '"Check them together"');
+        const id = await fresh(before, 'the check to be asked');
+        await answered(id);
+        return id;
+      },
+      dq: 'Check my answers together', reply: 'Placeholder check.', typed: 'You asked: “And what comes after that?',
+      chips: ['Which answer should I change?'],
+      next: 'Which answer should I change?',
+      head: 'Your answers', above: 'The readings are stored in',
+      reopen: () => click(button(strip(), 'Check them together'), '"Check them together"'),
+    },
   };
 
   const fixtures = {};
@@ -388,6 +484,9 @@
         if (kind === 'main') {
           await load();
           await askFirst(FIRST);
+        } else if (KINDS[kind].sent) {
+          await sentWithQuestions();
+          await KINDS[kind].open();
         } else {
           await load({ seed: await fixture('main') });
           await KINDS[kind].open();
@@ -412,6 +511,7 @@
   test('Start', 'empty storage shows the worked example, drawn in full', async () => {
     await load();
     eq(txt($('#notice')), 'Local preview. Answers here are placeholders from a stand-in, not from Claude.', 'The notice');
+    tidy('The worked example');
     const t = mainText();
     has(txt($('.turn[data-node="root"] .bubble')), 'How does knowledge distillation work?', 'The question');
     ok($$('.math', t).length >= 6 && !$('.math.raw', t), 'The formulas of the example are typeset');
@@ -1627,6 +1727,570 @@
     same([sentConvs().length, Object.keys(store().taken).sort(), Object.keys(held()).sort()], [1, ['bad', 'd1'], ['bad', 'd1']], 'The other is passed over, and stays where it is');
   });
 
+  // ----- the questions a sent answer asks -----
+  // The chat that sends an answer lists the questions it asks the reader.
+  // They are marked in the text, answered one at a time, and kept on a sheet.
+  // (The document and the helpers are with the saved states, above.)
+
+  test('Questions', 'the questions a sent answer asks are marked where they stand, and listed on the sheet', async () => {
+    await sentWithQuestions();
+    eq(calls().length, 0, 'Requests to Claude');
+    // Each quote is found in the drawn text, the third through its markup.
+    same($$('.askq', mainText()).map(e => [e.dataset.ask, txt(e), e.classList.contains('open'), e.classList.contains('last')]), [
+      ['q1', 'Does the file need to open in a spreadsheet?', true, true],
+      ['q2', 'Will it?', true, true],
+      ['q3', 'Which do you want: ', true, false], ['q3', 'UTC', true, false], ['q3', ' or local time?', true, true],
+    ], 'The marks');
+    has(qmark(1).title, 'A question for you.', 'What a mark says of itself');
+    same(qsheet().asks.map(a => [a.id, a.q, a.state, a.start != null]), [['q1', Q[0], 'open', true], ['q2', Q[1], 'open', true], ['q3', Q[2], 'open', true], ['q4', Q[3], 'open', false]], 'The sheet');
+    same([qsheet().node, qsheet().rev, qsheet().checked, qsheet().copied], ['root', 0, 0, 0], 'The sheet');
+    // One line above the message box, until it is unfolded.
+    same([stripLine(), $('.fold', strip()).getAttribute('aria-expanded'), qrows().length], ['▸ 4 questions for you, 0 settled', 'false', 0], 'The strip, folded');
+    tidy('A sent answer with questions');
+    ok(strip().nextElementSibling.matches('.composer') && strip().previousElementSibling.matches('.body'), 'It sits between the thread and its message box');
+    type($('.composer .msg', pane('root')), 'A draft');
+    await click($('.fold', strip()), 'the folded strip');
+    await until(() => qrows().length === 4, 'the rows');
+    same(qrows(), [['1.', Q[0], 'Open'], ['2.', Q[1], 'Open'], ['3.', Q[2], 'Open'], ['4.', Q[3], 'Open']], 'The rows');
+    eq($('.composer .msg', pane('root')).value, 'A draft', 'The draft is left alone');
+    // A sentence that asks nothing still has the ordinary menu.
+    await click(sentence(mainText(), 'I can.'), 'a sentence that is not a question');
+    ok((await menu()) && !pop().classList.contains('askpop') && button(pop(), 'Explain further'), 'The ordinary menu');
+    key(doc.body, 'Escape');
+    noSideways('A sent answer with questions');
+
+    // An answer sent with no questions has no sheet.
+    type($('.composer .msg', pane('root')), '');
+    win.claude.deliver({ question: 'Any questions?', answer: 'None. It is done.', questions: [] }, 'plain');
+    await until(() => conv().inbox === 'plain', 'the second document to open');
+    ok(!qsheet() && !$('.sheetbar') && !$('.askq'), 'No sheet, no strip, no marks');
+    tidy('A sent answer without questions');
+  });
+
+  test('Questions', 'the menu of a question, in two parts: an answer, a reason, leaving it to the asker and "Clear", kept through a reload', async () => {
+    await sentWithQuestions();
+    await click(qmark(1), 'the first question');
+    const m = await askMenu();
+    eq(txt($('.q', m)), Q[0], 'The menu says the question so that it stands alone');
+    same($$('.sec .lab > span', m).map(txt), ['Your answer', 'Get help'], 'Its two parts');
+    // On the question itself it does not offer to show the question.
+    same($$('button', m).map(txt), ['Save', 'Leave it to the asker', 'Help me answer'], 'What it offers');
+    same($$('input', m).map(i => i.placeholder), ['Type your answer…', 'Your reason, if you want to give one', 'Ask about this question…'], 'Its boxes');
+    eq(doc.activeElement, $('#pop-q'), 'The answer box has the focus');
+    // Enter with nothing typed keeps nothing.
+    key($('#pop-q'), 'Enter');
+    await sleep(150);
+    same([!!pop(), qsheet().rev], [true, 0], 'After Enter on an empty box');
+    type($('#pop-q'), 'Yes');
+    key($('#pop-q'), 'Enter');
+    await until(() => !pop() && entry(1).state === 'answered', 'the answer to be kept');
+    same([entry(1).answer, entry(1).why, entry(1).from, qsheet().rev], ['Yes', '', '', 1], 'The entry');
+    ok(qmark(1).classList.contains('answered') && !qmark(1).classList.contains('open'), 'The mark shows it answered');
+    eq(qmark(1).title, 'Your answer: Yes', 'The mark says the answer');
+    eq(stripLine(), '▸ 4 questions for you, 1 settled', 'The strip');
+    eq(calls().length, 0, 'Requests to Claude');
+
+    // Left to the asker, then taken back.
+    await click(qmark(2), 'the second question');
+    await click(button(await askMenu(), 'Leave it to the asker'), '"Leave it to the asker"');
+    await until(() => entry(2).state === 'left', 'the question to be left to the asker');
+    ok(qmark(2).classList.contains('left'), 'The mark shows it');
+    eq(stripLine(), '▸ 4 questions for you, 2 settled', 'The strip');
+    await click(qmark(2), 'the second question');
+    same($$('.more button', await askMenu()).map(txt), ['Clear'], 'A question that was left offers "Clear", and no longer to leave it');
+    await click(button(pop(), 'Clear'), '"Clear"');
+    await until(() => entry(2).state === 'open' && qmark(2).classList.contains('open'), 'the question to be open again');
+
+    // An answer can be reworded and given a reason; Save does what Enter does.
+    await click(qmark(1), 'the first question');
+    await askMenu();
+    same([$('#pop-q').value, $('#pop-why').value], ['Yes', ''], 'The menu holds the answer');
+    type($('#pop-q'), 'Yes, in Excel');
+    type($('#pop-why'), 'The finance team edits it there.');
+    await click(button(pop(), 'Save'), '"Save"');
+    await until(() => entry(1).why, 'the reason to be kept');
+    same([entry(1).answer, entry(1).why, qsheet().rev], ['Yes, in Excel', 'The finance team edits it there.', 4], 'The entry');
+
+    // A row of the sheet opens the same menu, also for a question that has no place in the text.
+    await click($('.fold', strip()), 'the folded strip');
+    await until(() => qrows().length === 4, 'the rows');
+    same(qrows()[0], ['1.', Q[0], 'Yes, in ExcelThe finance team edits it there.'], 'The row of an answered question');
+    ok(!qmark(4), 'The fourth question has no mark');
+    // From a row the menu can show where the question stands, when it stands somewhere.
+    await click($('.qrow[data-ask="q3"]', strip()), 'the row of the third question');
+    same([txt($('.q', await askMenu())), !!button(pop(), 'Show in the text')], [Q[2], true], 'The menu of a row');
+    key(doc.body, 'Escape');
+    await until(() => !pop(), 'the menu to close');
+    await click($('.qrow[data-ask="q4"]', strip()), 'the row of the fourth question');
+    same([txt($('.q', await askMenu())), !!button(pop(), 'Show in the text')], [Q[3], false], 'Its menu');
+    type($('#pop-q'), 'Twelve');
+    key($('#pop-q'), 'Enter');
+    await until(() => entry(4).answer === 'Twelve', 'the answer to be kept');
+    same(qrows()[3], ['4.', Q[3], 'Twelve'], 'Its row');
+    // Escape closes the menu and keeps nothing.
+    await click(qmark(3), 'the third question');
+    await askMenu();
+    type($('#pop-q'), 'Not kept');
+    key(doc.body, 'Escape');
+    await until(() => !pop(), 'the menu to close');
+    eq(entry(3).state, 'open', 'The third question');
+
+    const before = JSON.stringify(qsheet());
+    await reload();
+    await until(() => strip() && qmark(1), 'the conversation to be back');
+    eq(JSON.stringify(qsheet()), before, 'The sheet after a reload');
+    ok(qmark(1).classList.contains('answered') && qmark(2).classList.contains('open'), 'The marks after a reload');
+    eq(stripLine(), '▸ 4 questions for you, 2 settled', 'The strip after a reload');
+  });
+
+  test('Questions', 'a help opens the thread of the question, the sheet travels with every question, and a proposed answer can be used', async () => {
+    await sentWithQuestions();
+    await answerIn(1, 'Yes');
+    const th = await helpFrom(2);
+    await until(() => pane(th), 'the thread to open beside the answer');
+    same([node(th).parent, node(th).q, node(th).help, node(th).anchor.ask, node(th).anchor.text], ['root', 'Help me answer', 'help', 'q2', Q[1]], 'The thread');
+    same([node(th).anchor.start, node(th).anchor.end], [entry(2).start, entry(2).end], 'It hangs where the question stands');
+    eq(node(th).prompt, `About this question you asked me: "${Q[1]}"\n\nHelp me answer it. First say in a sentence or two what depends on my answer and what choices you see. Where you are inferring this from what was sent here, say so. Then ask me one easy question about my own situation, in words I would use. Go on one question at a time, and propose an answer once you can.\n\n(The app worded this request. Answer in the language of the answer it is about, not in the language of this request.)`, 'What is asked');
+    eq(txt($('header .from', pane(th))), `“${Q[1]}”`, 'The heading of the thread');
+    eq($('.composer .msg', pane(th)).placeholder, 'Ask more about this question…', 'Its message box');
+    // The sheet goes with the question, as it stands now, and is not kept in the turn.
+    const call = lastCall();
+    eq(call.prompt, node(th).prompt + `\n\n${NOTE_HEAD}\n1. ${Q[0]}\n   My answer: Yes\n2. ${Q[1]}\n   Not answered yet.\n3. ${Q[2]}\n   Not answered yet.\n4. ${Q[3]}\n   Not answered yet.\nThis thread is about question 2.)`, 'The turn sent');
+    lacks(node(th).prompt, 'The app added this note', 'The turn as kept');
+    has(call.turns[0].content, OFFER_RULE, 'The instructions say when to propose an answer');
+    has(txt(answerText(th)), 'Placeholder help.', 'The reply');
+    ok(!$('.offer', pane(th)), 'A reply that only explains proposes nothing');
+    // The question shows that its thread is open; the thread draws no mark of its own.
+    ok(qmark(2).classList.contains('active') && !$('mark[data-node]', mainText()), 'The marks');
+    same(chipLabels(th), ['Why do you ask?', 'What would you pick?', 'What would change your mind?', 'Show this as a diagram'], 'The chips: the helps the menu does not offer come first');
+
+    // "What would you pick?" comes with a proposal, and the button takes it.
+    const had = ids();
+    await click(chip(th, 'What would you pick?'), 'the chip "What would you pick?"');
+    const pick = await fresh(had);
+    await answered(pick);
+    same([node(pick).parent, node(pick).help, node(pick).anchor], [th, 'pick', null], 'The next turn of the same thread');
+    const box = () => $(`.turn[data-node="${pick}"] .offer`, pane(th));
+    await until(box, 'the proposed answer');
+    same([txt($('.k', box())), txt($('.a', box())), txt($('.y', box()))], ['Proposed answer to question 2', 'Placeholder answer from the stand-in', 'The stand-in proposes this so that the button can be tried.'], 'The proposal');
+    same([!!$('.q', box()), !!$('.was', box())], [false, false], 'In the question\'s own thread it does not repeat the question, and an open question has no answer to show');
+    eq(entry(2).state, 'open', 'Nothing reaches the sheet until the reader takes it');
+    await click(button(box(), 'Use as my answer'), '"Use as my answer"');
+    await until(() => entry(2).state === 'answered', 'the answer to reach the sheet');
+    same([entry(2).answer, entry(2).why, entry(2).from], ['Placeholder answer from the stand-in', 'The stand-in proposes this so that the button can be tried.', pick], 'The entry');
+    has(toastText(), 'Added to your answers.', 'The toast');
+    same([txt($('.k', box())), !!button(box(), 'Use as my answer')], ['✓ On your sheet: question 2', false], 'The proposal once taken');
+    has(txt($('.banner.onsheet', pane(th))), '✓ Your answer', 'The thread says what the sheet holds');
+    ok(pane(th) && node(th).status === 'open', 'Taking an answer leaves the thread open');
+    ok(qmark(2).classList.contains('answered'), 'The mark');
+
+    // A typed message: no proposal unless one fits, and the sheet it is sent with is the current one.
+    const typed = await sendIn(th, 'What if two of us read it?');
+    await answered(typed);
+    eq(node(typed).prompt, 'What if two of us read it?', 'The typed turn');
+    has(lastCall().prompt, 'This thread is about question 2.', 'The turn sent');
+    has(txt(answerText(typed)), 'shown 2 settled answers', 'The reply saw the sheet as it now stands');
+    ok(!$(`.turn[data-node="${typed}"] .offer`), 'No proposal');
+    const again = await sendIn(th, 'Then say it #offer');
+    await answered(again);
+    const second = await until(() => $(`.turn[data-node="${again}"] .offer`), 'a second proposal');
+    eq($$('.offer.on', pane(th)).length, 1, 'Only the one that was taken says so');
+    same([txt($('.was', second)), $$('button', second).map(txt)], ['Now: Placeholder answer from the stand-in', ['Replace my answer']], 'A proposal for a settled question shows what the sheet holds, and offers to replace it');
+
+    // Rewording the answer unties it from the proposal.
+    await click(button($('.banner.onsheet', pane(th)), 'Change'), '"Change"');
+    await askMenu();
+    type($('#pop-q'), 'Two of us, both in the team');
+    key($('#pop-q'), 'Enter');
+    await until(() => entry(2).answer === 'Two of us, both in the team', 'the reworded answer');
+    eq(entry(2).from, '', 'It no longer comes from the proposal');
+    eq($$('.offer.on', pane(th)).length, 0, 'No proposal says it is on the sheet');
+
+    // A question that has a thread is helped there: its menu leads to the
+    // thread and asks nothing new. A second help continues the thread.
+    await click($('header .icon', pane(th)), 'the × of the thread');
+    await until(() => !pane(th), 'the thread to close');
+    await click(qmark(2), 'the second question');
+    same([$$('.helps button', await askMenu()).map(txt), !!$('#pop-ask')], [['Open the thread'], false], 'The help its menu offers now');
+    // It leads somewhere and asks nothing, so it is a button and not a pill.
+    ok($('.helps button', pop()).classList.contains('btn'), '"Open the thread" is drawn as a button');
+    // A scroll closes the menu, and a page that is not on screen hears of
+    // the scroll that closing the thread made only now.
+    await sleep(200);
+    if (!pop()) await click(qmark(2), 'the second question again');
+    await click(button(await askMenu(), 'Open the thread'), '"Open the thread"');
+    await until(() => pane(th), 'the thread to open again');
+    const leaf = lastCol().leaf;
+    const sofar = ids();
+    await click(chip(th, 'Why do you ask?'), 'the chip "Why do you ask?"');
+    const help = await fresh(sofar, 'the second help');
+    await answered(help);
+    same([node(help).parent, node(help).help, lastStart()], [leaf, 'why', th], 'A second help is the next turn of the same thread');
+    eq(Object.values(conv().nodes).filter(n => n.anchor && n.anchor.ask === 'q2').length, 1, 'Threads on the second question');
+
+    // An ordinary side question in the same conversation knows the answers too, and proposes none.
+    await click($('header .icon', pane(th)), 'the × of the thread');
+    await until(() => pane('root') && !pane(th), 'the first thread alone');
+    await click(sentence(mainText(), 'I can.'), 'a sentence that is not a question');
+    const side = await explain();
+    has(lastCall().prompt, NOTE_HEAD, 'The sheet travels with it');
+    lacks(lastCall().prompt, 'This thread is about question', 'It is about no question');
+    has(lastCall().turns[0].content, OFFER_RULE, 'It may propose all the same');
+    same([node(side).anchor.ask || null, !!$(`mark[data-node="${side}"]`, mainText())], [null, true], 'An ordinary thread, with its mark');
+    ok(!$('.offer', pane(side)), 'It proposes nothing unasked');
+  });
+
+  test('Questions', 'any thread may propose an answer to any question: the box names the question, and shows what the sheet holds for it', async () => {
+    await sentWithQuestions();
+    await answerIn(1, 'Yes');
+    const boxes = id => $$(`.turn[data-node="${id}"] .offer`);
+    const shown = b => [txt($('.k', b)), $('.q', b) ? txt($('.q', b)) : null, $('.was', b) ? txt($('.was', b)) : null, txt($('.a', b)), $$('button', b).map(txt)];
+
+    // In the first thread, which is about no question: two proposals in
+    // one reply, each for the question it names. A number that no question
+    // has draws nothing.
+    const both = await sendIn('root', 'What follows from that? #offer:1,3,9');
+    await answered(both);
+    lacks(lastCall().prompt, 'This thread is about question', 'The thread is about no question');
+    has(lastCall().turns[0].content, OFFER_RULE, 'The instructions say that it may propose');
+    await until(() => boxes(both).length === 2, 'the two proposals');
+    same(shown(boxes(both)[0]), ['Proposed answer to question 1', Q[0], 'Now: Yes', 'Placeholder answer to question 1', ['Replace my answer']], 'For a question that has an answer');
+    same(shown(boxes(both)[1]), ['Proposed answer to question 3', Q[2], null, 'Placeholder answer to question 3', ['Use as my answer']], 'For an open question');
+    same([entry(1).answer, entry(3).state], ['Yes', 'open'], 'Nothing reaches the sheet until the reader takes it');
+    await click(button(boxes(both)[1], 'Use as my answer'), '"Use as my answer"');
+    await until(() => entry(3).state === 'answered', 'the answer to question 3');
+    same([entry(3).answer, entry(3).why, entry(3).from, entry(1).answer], ['Placeholder answer to question 3', 'The stand-in proposes this for question 3.', both, 'Yes'], 'Only that question is answered');
+    has(toastText(), 'Added to your answers.', 'The toast');
+    await click(button(boxes(both)[0], 'Replace my answer'), '"Replace my answer"');
+    await until(() => entry(1).answer === 'Placeholder answer to question 1', 'the answer to question 1 to be replaced');
+    has(toastText(), 'Your answer is replaced.', 'The toast');
+    same(boxes(both).map(b => [txt($('.k', b)), $$('button', b).length]), [['✓ On your sheet: question 1', 0], ['✓ On your sheet: question 3', 0]], 'Both say that they are on the sheet');
+    ok(qmark(1).classList.contains('answered') && qmark(3).classList.contains('answered'), 'The marks');
+    // A proposal that names no question has none to go to here.
+    const none = await sendIn('root', 'And then? #offer');
+    await answered(none);
+    await sleep(100);
+    eq(boxes(none).length, 0, 'A proposal with no number, in a thread about no question');
+
+    // A passage inside the thread of a question: its thread is about that
+    // question too, so a proposal with no number goes to it. The box says
+    // which question, since the thread's heading is the passage.
+    const th = await helpFrom(2);
+    await until(() => pane(th), 'the thread of the second question');
+    await click(sentence(answerText(th), 'What do you use it for?'), 'a sentence of the help');
+    const side = await explain();
+    same([node(side).parent, node(side).anchor.ask || null], [th, null], 'A passage thread inside the thread of the question');
+    has(lastCall().prompt, 'This thread is about question 2.', 'It is told which question it comes from');
+    has(txt(answerText(side)), 'Placeholder answer about the part you pointed at.', 'It is answered as a passage');
+    eq(boxes(side).length, 0, 'An explanation proposes nothing');
+    const agreed = await sendIn(side, 'Yes, I agree. Can you propose it? #offer');
+    await answered(agreed);
+    await until(() => boxes(agreed).length === 1, 'the proposal in the passage thread');
+    same(shown(boxes(agreed)[0]), ['Proposed answer to question 2', Q[1], null, 'Placeholder answer from the stand-in', ['Use as my answer']], 'The proposal');
+    await click(button(boxes(agreed)[0], 'Use as my answer'), '"Use as my answer"');
+    await until(() => entry(2).state === 'answered', 'the answer to question 2');
+    same([entry(2).answer, entry(2).from], ['Placeholder answer from the stand-in', agreed], 'The entry');
+    // The same thread may propose for another question as well.
+    const other = await sendIn(side, 'That changes the fourth. #offer:4');
+    await answered(other);
+    await until(() => boxes(other).length === 1, 'the proposal for another question');
+    same(shown(boxes(other)[0]), ['Proposed answer to question 4', Q[3], null, 'Placeholder answer to question 4', ['Use as my answer']], 'For another question than the thread\'s own');
+
+    // The check may propose the change that settles a conflict.
+    await click($('header .icon', pane(side)), 'the × of the passage thread');
+    await click($('header .icon', pane(th)), 'the × of the thread');
+    await until(() => !pane(th) && !pane(side), 'the first thread alone');
+    const before = ids();
+    await click(button(strip(), 'Check them together'), '"Check them together"');
+    const check = await fresh(before, 'the check to be asked');
+    await answered(check);
+    has(lastCall().turns[0].content, OFFER_RULE, 'The check may propose');
+    has(lastCall().prompt, 'Where changing one answer would settle a conflict, you may propose that answer.', 'It is asked for the change that settles a conflict');
+    eq(boxes(check).length, 0, 'The stand-in\'s check proposes nothing');
+    const fix = await sendIn(check, 'Then change the second. #offer:2');
+    await answered(fix);
+    await until(() => boxes(fix).length === 1, 'the proposal in the check');
+    same(shown(boxes(fix)[0]), ['Proposed answer to question 2', Q[1], 'Now: Placeholder answer from the stand-in', 'Placeholder answer to question 2', ['Replace my answer']], 'The proposal');
+    const unnamed = await sendIn(check, 'And which else? #offer');
+    await answered(unnamed);
+    await sleep(100);
+    eq(boxes(unnamed).length, 0, 'In the check a proposal has to name its question');
+    tidy('Proposals from any thread');
+    noSideways('Proposals from any thread');
+  });
+
+  test('Questions', 'a question typed in the menu starts the thread in the reader\'s own words, and Enter in the empty box asks for help', async () => {
+    await sentWithQuestions();
+    await click(qmark(3), 'the third question');
+    await askMenu();
+    let before = ids();
+    type($('#pop-ask'), 'Does UTC confuse the finance team?');
+    key($('#pop-ask'), 'Enter');
+    const th = await fresh(before, 'the question to be asked');
+    await answered(th);
+    await until(() => pane(th) && !pop(), 'the thread to open beside the answer');
+    same([node(th).parent, node(th).q, node(th).help || null, node(th).anchor.ask, node(th).anchor.text], ['root', 'Does UTC confuse the finance team?', null, 'q3', Q[2]], 'The thread');
+    // The reader's own words, so not marked as worded by the app.
+    eq(node(th).prompt, `About this question you asked me: "${Q[2]}"\n\nDoes UTC confuse the finance team?`, 'What is asked');
+    has(lastCall().prompt, 'This thread is about question 3.', 'The turn sent');
+    has(txt(answerText(th)), 'Placeholder reply in the thread of a question.', 'The reply');
+    same(chipLabels(th).slice(0, 3), ['Why do you ask?', 'What would you pick?', 'Help me answer'], 'The chips: every help is still to be asked');
+    eq(entry(3).state, 'open', 'Asking answers nothing');
+
+    // Enter in the empty box does what the button does, as in the menu of a passage.
+    await click(qmark(1), 'the first question');
+    await askMenu();
+    before = ids();
+    $('#pop-ask').focus();
+    key($('#pop-ask'), 'Enter');
+    const help = await fresh(before, 'the help to be asked');
+    await answered(help);
+    same([node(help).q, node(help).help, node(help).anchor.ask], ['Help me answer', 'help', 'q1'], 'The thread it starts');
+    // Enter in the answer box is still for the answer.
+    await click(qmark(2), 'the second question');
+    await askMenu();
+    before = ids();
+    type($('#pop-q'), 'No');
+    key($('#pop-q'), 'Enter');
+    await until(() => entry(2).answer === 'No', 'the answer to be kept');
+    eq(ids().length, before.length, 'No thread was started');
+  });
+
+  test('Questions', 'the thread of a question opens with the question, word for word, and its words are asked about like any other text', async () => {
+    await sentWithQuestions();
+    const lead = id => $('.lead', answerText(id));
+    // It is there before the reply is: the page puts it, Claude does not.
+    await click(qmark(3), 'the third question');
+    await askMenu();
+    let before = ids();
+    type($('#pop-ask'), 'Take your time #slow');
+    key($('#pop-ask'), 'Enter');
+    const th = await fresh(before, 'the question to be asked');
+    await until(() => pane(th) && lead(th), 'the question at the top of its thread');
+    ok(node(th).phase !== 'done', 'The reply is still to come');
+    await answered(th);
+    same([node(th).lead, txt(lead(th))], [Q[2], Q[2]], 'The question, word for word');
+    ok(txt(answerText(th)).startsWith(Q[2] + 'Placeholder reply in the thread of a question.'), 'The reply comes after it');
+    lacks(node(th).raw, Q[2], 'The reply as it is kept');
+
+    // Words of the question, pointed at like any other: the thread hangs
+    // from them, and Claude is told they are the question's and not its own.
+    const o = await drag(() => answerText(th), 'UTC or in local time');
+    await menu();
+    before = ids();
+    type($('#pop-q'), 'Which is usual?');
+    key($('#pop-q'), 'Enter');
+    const side = await fresh(before);
+    await until(() => pane(side), 'the thread beside it');
+    await answered(side);
+    same([node(side).parent, node(side).anchor.text, node(side).anchor.start, node(side).anchor.end, node(side).anchor.lead],
+      [th, 'UTC or in local time', o.start, o.end, true], 'The thread');
+    ok(o.end <= Q[2].length, 'Its place is inside the question');
+    eq(node(side).prompt, 'About this part of the question you asked me:\n"UTC or in local time"\n\nWhich is usual?', 'What is asked');
+    eq($$(`mark[data-node="${side}"]`, lead(th)).map(txt).join(''), 'UTC or in local time', 'The marked words');
+    // The question is not sent as part of the reply it stands above.
+    const sent = lastCall().turns.filter(x => x.role === 'assistant').map(x => x.content);
+    lacks(sent[sent.length - 1], Q[2], 'The reply as Claude is sent it');
+    has(lastCall().prompt, 'This thread is about question 3.', 'The turn sent');
+
+    // A sentence of the question with one click, and a term in it.
+    await click($(`.pane[data-start="${side}"] header .icon`), 'the × of the thread');
+    await click(sentence(lead(th), 'Should the timestamps'), 'the sentence of the question');
+    const whole = await explain();
+    same([node(whole).anchor.lead, node(whole).anchor.text], [true, Q[2]], 'The thread on the whole sentence');
+    has(node(whole).prompt, `About this part of the question you asked me:\n"${Q[2]}"\n\nExplain this part further.`, 'What is asked');
+    await click($(`.pane[data-start="${whole}"] header .icon`), 'the × of the thread');
+
+    // A passage of the reply is still a part of the answer.
+    await click(sentence(answerText(th), 'Placeholder reply'), 'a sentence of the reply');
+    const part = await explain();
+    same([node(part).anchor.lead || false, node(part).anchor.start >= Q[2].length], [false, true], 'The thread on the reply');
+    has(node(part).prompt, 'About this part of your answer:\n"Placeholder reply', 'What is asked');
+    await click($(`.pane[data-start="${part}"] header .icon`), 'the × of the thread');
+
+    // Only the first reply of the thread has it.
+    before = ids();
+    await click(chip(th, 'Why do you ask?'), 'the chip "Why do you ask?"');
+    const next = await fresh(before, 'the second turn');
+    await answered(next);
+    same([node(next).lead || null, !!lead(next)], [null, false], 'The second reply');
+
+    // The write-up shows the question too, with its side threads under it.
+    await click($('#writeup'), '"Write it up"');
+    const sheet = await until(() => $('#modal.show .sheet'), 'the write-up');
+    eq(txt($('.lead', sheet)), Q[2], 'The question in the write-up');
+    ok($('.lead', sheet).parentElement.nextElementSibling.classList.contains('dbranch'), 'A thread on its words stands under it');
+    await click(button(sheet, 'Close'), '"Close"');
+
+    // Kept through a reload.
+    await load({ keep: true });
+    await until(() => pane(th) && lead(th), 'the thread after a reload');
+    eq(txt(lead(th)), Q[2], 'The question after a reload');
+    eq($$('mark', lead(th)).length > 0, true, 'Its marks after a reload');
+  });
+
+  test('Questions', 'a decision the answer only points to: listed with no quote, shortened in its row and in the reply, whole in its menu and for Claude', async () => {
+    // Worded with its options and the recommendation, so it is long.
+    const LONG = 'How long should the exported files be kept? The options in the plan were three months, a year, or for good. I recommended a year. '
+      + Array(9).fill('Three months is too short to compare a month with the same month of the year before, and keeping them for good means nobody clears out old files.').join(' ');
+    ok(LONG.length > 1200 && LONG.length < 1500, `The question of this test has ${LONG.length} characters`);
+    const SHORT = 'Does the exported file need a header row?';
+    const sentDoc = {
+      from: 'chat', title: 'Two choices', question: 'What is left to decide?',
+      answer: 'Two things are left. Does the file need a header row? The other choice is in the plan I wrote before: how long the files are kept.',
+      questions: [{ quote: 'Does the file need a header row?', question: SHORT }, { question: LONG }],
+    };
+    await load({ inbox: { q: sentDoc } });
+    await until(() => conv().inbox === 'q' && mainText() && strip(), 'the document to open, with its questions');
+    same($$('.askq', mainText()).map(e => e.dataset.ask), ['q1'], 'The marks');
+    same(qsheet().asks.map(a => [a.q, a.quote, a.start != null]), [[SHORT, 'Does the file need a header row?', true], [LONG, '', false]], 'The sheet');
+    eq(stripLine(), '▸ 2 questions for you, 0 settled', 'The strip');
+    await click($('.fold', strip()), 'the folded strip');
+    await until(() => qrows().length === 2, 'the rows');
+    // Its row has the question whole and shows the first two lines of it.
+    const row = () => $('.qrow[data-ask="q2"]', strip());
+    const cell = $('.q', row());
+    const line = parseFloat(win.getComputedStyle(cell).lineHeight);
+    eq(txt(cell), LONG, 'The row of the long question');
+    ok(line > 0 && cell.clientHeight <= 2 * line + 2 && cell.scrollHeight > cell.clientHeight, `Its row shows two lines of it (${cell.clientHeight}px of ${cell.scrollHeight}px, a line is ${line}px)`);
+
+    // The menu has it whole, in a box that scrolls, and stays in the window.
+    await click(row(), 'the row of the long question');
+    const m = await askMenu(), mq = $('.q', m), at = m.getBoundingClientRect();
+    eq(txt(mq), LONG, 'The menu says the question whole');
+    ok(mq.scrollHeight > mq.clientHeight, 'The question scrolls in its menu');
+    ok(at.top >= 0 && at.bottom <= win.innerHeight, `The menu fits the window (${Math.round(at.top)} to ${Math.round(at.bottom)} of ${win.innerHeight})`);
+    ok(!button(m, 'Show in the text'), 'It has no place in the text to show');
+    mq.scrollTop = 40;
+    mq.dispatchEvent(new win.Event('scroll'));
+    await sleep(150);
+    ok(pop(), 'Scrolling the question leaves its menu open');
+
+    // Claude gets it whole: in the request, and in the note of the answers.
+    const before = ids();
+    await click(button(pop(), 'Help me answer'), '"Help me answer"');
+    const th = await fresh(before, 'the help to be asked');
+    await answered(th);
+    await until(() => pane(th), 'the thread to open beside the answer');
+    same([node(th).anchor.ask, node(th).anchor.text, node(th).anchor.start >= 1e9], ['q2', LONG, true], 'The thread');
+    has(node(th).prompt, `About this question you asked me: "${LONG}"`, 'What is asked');
+    has(lastCall().prompt, `2. ${LONG}\n   Not answered yet.`, 'The note sent with it');
+    // Its thread opens with it whole, where the heading shows three lines.
+    eq(txt($('.lead', answerText(th))), LONG, 'The question at the top of its thread');
+
+    // The reply has the start of it: the chat that asked knows the rest.
+    await click(row(), 'the row of the long question');
+    await askMenu();
+    type($('#pop-q'), 'A year');
+    key($('#pop-q'), 'Enter');
+    await until(() => entry(2).answer === 'A year', 'the answer to be kept');
+    const grab = clipboard();
+    await click(button(strip(), 'Copy reply'), '"Copy reply"');
+    eq(await until(() => grab.text, 'the reply'), `2. ${LONG.slice(0, 199).trimEnd()}…\n   A year\n\nNot answered yet:\n1. ${SHORT}\n`, 'The reply');
+    // The Markdown write-up has it whole, under the line that cuts it.
+    await click($('#writeup'), '"Write it up"');
+    const sheet = await until(() => $('#modal.show .sheet'), 'the write-up');
+    grab.text = null;
+    await click(button(sheet, 'Copy as Markdown'), '"Copy as Markdown"');
+    has(await until(() => grab.text, 'the Markdown'), `**Help me answer**\n>\n> The question, as it was sent: ${LONG}\n>\n> Placeholder help.`, 'The Markdown of its thread');
+    await click(button(sheet, 'Close'), '"Close"');
+    tidy('A question the answer only points to');
+    noSideways('A question the answer only points to');
+  });
+
+  test('Questions', '"Check them together" reads all the answers in a thread of its own, and checking again continues it', async () => {
+    await sentWithQuestions();
+    const check = () => button(strip(), 'Check them together');
+    await click(check(), '"Check them together"');
+    has(toastText(), 'Answer a question first.', 'With nothing answered');
+    eq(calls().length, 0, 'Requests to Claude');
+
+    await answerIn(1, 'Yes', 'The finance team edits it there.');
+    eq(stripNote(), '', 'Nothing is said of a check before the first one');
+    let before = ids();
+    await click(check(), '"Check them together"');
+    const th = await fresh(before, 'the check to be asked');
+    await answered(th);
+    await until(() => pane(th), 'the check to open beside the answer');
+    same([node(th).parent, node(th).q, node(th).anchor.check, node(th).anchor.text, node(th).anchor.ask || null], ['root', 'Check my answers together', true, 'Your answers', null], 'The thread of the check');
+    ok(node(th).prompt.startsWith('Check my answers together before I send them back.') && node(th).prompt.endsWith('not in the language of this request.)'), 'What is asked');
+    eq(txt($('header .from', pane(th))), 'Your answers', 'Its heading');
+    eq($('.composer .msg', pane(th)).placeholder, 'Ask about the check…', 'Its message box');
+    has(lastCall().prompt, `1. ${Q[0]}\n   My answer: Yes\n   Why: The finance team edits it there.\n2. ${Q[1]}\n   Not answered yet.`, 'It is sent the answers with their reasons');
+    lacks(lastCall().prompt, 'This thread is about question', 'It is about all of them');
+    eq(lastCall().turns.length, 4, 'The turns sent: the sent conversation and the check');
+    has(txt(answerText(th)), 'The stand-in was shown 1 settled answer and', 'The reply');
+    same([qsheet().checked, qsheet().rev, stripNote()], [1, 1, ''], 'The sheet knows it was checked');
+    same(chipLabels(th), ['Which answer should I change?'], 'The chips: nothing to check again, and no diagram');
+    has(txt($('#tree')), 'Your answers', 'The map');
+    ok(!$('mark[data-node]', mainText()), 'The check marks nothing in the text');
+
+    // With nothing changed the button only shows the thread.
+    await click($('header .icon', pane(th)), 'the × of the thread');
+    await until(() => !pane(th), 'the thread to close');
+    const asked = calls().length;
+    await click(check(), '"Check them together"');
+    await until(() => pane(th), 'the check to open again');
+    eq(calls().length, asked, 'Requests to Claude');
+
+    // After a change the strip says so, and checking again is the next turn of the same thread.
+    await click(qmark(2), 'the second question');
+    await click(button(await askMenu(), 'Leave it to the asker'), '"Leave it to the asker"');
+    await until(() => stripNote() === 'not checked since your last change', 'the note on the strip');
+    ok(chipLabels(th).includes('Check again'), 'The thread offers to check again');
+    before = ids();
+    await click(chip(th, 'Check again'), 'the chip "Check again"');
+    const second = await fresh(before, 'the second check');
+    await answered(second);
+    same([node(second).parent, node(second).q, node(second).anchor], [th, 'Check them again', null], 'The second check');
+    ok(node(second).prompt.startsWith('I have changed my answers. Check them together again'), 'What is asked');
+    has(txt(answerText(second)), 'The stand-in was shown 2 settled answers', 'It read the sheet as it now stands');
+    eq(lastCall().turns.length, 6, 'The turns sent: the first check travels with the second');
+    same([qsheet().checked === qsheet().rev, stripNote()], [true, ''], 'The sheet');
+    eq(Object.values(conv().nodes).filter(n => n.anchor && n.anchor.check).length, 1, 'Threads of the check');
+    // The button on the strip does the same after another change.
+    await answerIn(3, 'UTC');
+    before = ids();
+    await click(check(), '"Check them together"');
+    const third = await fresh(before, 'the third check');
+    eq(node(third).parent, second, 'It follows the second');
+    await answered(third);
+  });
+
+  test('Questions', '"Copy reply" puts the questions with their answers on the clipboard, and shows them where the clipboard is refused', async () => {
+    await sentWithQuestions();
+    let grab = clipboard();
+    const copy = () => button(strip(), 'Copy reply');
+    await click(copy(), '"Copy reply"');
+    has(toastText(), 'Nothing is answered yet.', 'With nothing answered');
+    eq(grab.text, null, 'The clipboard');
+
+    await answerIn(1, 'Yes, in Excel', 'The finance team edits it there.');
+    await click(qmark(2), 'the second question');
+    await click(button(await askMenu(), 'Leave it to the asker'), '"Leave it to the asker"');
+    await until(() => entry(2).state === 'left', 'the question to be left to the asker');
+    await click(copy(), '"Copy reply"');
+    eq(await until(() => grab.text, 'the reply'), [
+      `1. ${Q[0]}`, '   Yes, in Excel', '   (The finance team edits it there.)',
+      `2. ${Q[1]}`, '   Your call.',
+      '', 'Not answered yet:', `3. ${Q[2]}`, `4. ${Q[3]}`, '',
+    ].join('\n'), 'The reply');
+    has(toastText(), 'Copied. Paste it into the chat that asked.', 'The toast');
+    same([qsheet().copied, qsheet().rev, stripNote()], [2, 2, ''], 'The sheet knows what was copied');
+    eq(calls().length, 0, 'Requests to Claude');
+    await answerIn(3, 'UTC');
+    eq(stripNote(), 'changed since you copied', 'The note on the strip after a change');
+
+    // A view that refuses the clipboard: the reply is shown, selected.
+    grab = clipboard(true);
+    await click(copy(), '"Copy reply"');
+    const ta = await until(() => $('.sheetbar textarea.reply'), 'the reply shown in the strip');
+    has(ta.value, `3. ${Q[2]}\n   UTC\n\nNot answered yet:\n4. ${Q[3]}\n`, 'The reply shown');
+    same([doc.activeElement === ta, ta.selectionEnd - ta.selectionStart === ta.value.length], [true, true], 'It is selected');
+    has(toastText(), 'Selected. Copy it with your keyboard.', 'The toast');
+    eq(stripNote(), '', 'The note');
+  });
+
   test('Conversations', 'new, switch and delete', async () => {
     await load();
     await askFirst('A first topic');
@@ -1781,8 +2445,9 @@
       label: 'Typed message',
       run: async kind => {
         await given(kind);
+        const K = KINDS[kind];
         const id = lastStart(), leaf = lastCol().leaf;
-        eq($('.composer .msg', pane(id)).placeholder, KINDS[kind].box, 'The message box');
+        eq($('.composer .msg', pane(id)).placeholder, K.box, 'The message box');
         const q = 'And what comes after that?';
         const next = await sendIn(id, q);
         same([node(next).parent, node(next).q, node(next).prompt, node(next).anchor], [leaf, q, q, null], 'The new turn');
@@ -1791,20 +2456,38 @@
         const n = await answered(next);
         await drawn();
         eq(n.phase, 'done', 'The turn');
-        has(txt(answerText(next)), `You asked: “${q}”.`, 'The answer');
+        has(txt(answerText(next)), K.typed || `You asked: “${q}”.`, 'The answer');
         same([lastCol().start, lastCol().leaf, cols().length], [id, next, kind === 'main' ? 1 : 2], 'The columns');
-        eq(lastCall().prompt, q, 'The question sent');
+        // In a conversation that has a sheet, the reader's answers go with the question.
+        if (K.sent) ok(lastCall().prompt.startsWith(q + '\n\n' + NOTE_HEAD), 'The question sent, with the sheet');
+        else eq(lastCall().prompt, q, 'The question sent');
         eq(lastCall().turns.length, kind === 'main' ? 4 : 6, 'The turns sent');
-        if (kind !== 'main') ok(KINDS[kind].mark(id).classList.contains('active'), 'The thread stays attached to what was pointed at');
+        if (K.mark) ok(K.mark(id).classList.contains('active'), 'The thread stays attached to what was pointed at');
+        tidy('After a typed message');
       },
     },
     chips: {
       label: 'Follow-up chips',
       run: async kind => {
         await given(kind);
+        const K = KINDS[kind];
         const id = lastStart();
         if (kind === 'main') {
           same(chipLabels(id), NEXT, 'The chips');
+        } else if (K.sent) {
+          same(chipLabels(id), K.chips, 'The chips');
+          // A help with the question that has not been asked for yet.
+          if (K.oneClick) {
+            const had = ids(), tip = lastCol().leaf;
+            await click(chip(id, K.oneClick.label), `the chip "${K.oneClick.label}"`);
+            const v = await fresh(had);
+            same([node(v).q, node(v).help, node(v).parent], [K.oneClick.label, K.oneClick.help, tip], 'The new turn');
+            has(node(v).prompt, `About this question you asked me: "${K.about}"\n\n${K.oneClick.asks}`, 'The question sent');
+            has(node(v).prompt, '\n\n(The app worded this request.', 'It says that the app worded it');
+            await answered(v);
+            has(txt(answerText(v)), K.oneClick.reply, 'The answer');
+            ok(!chipLabels(id).includes(K.oneClick.label), 'A help already asked for is not offered again');
+          }
         } else {
           same(chipLabels(id), ['Show me an example', 'Say it more simply', 'Why is this true?', 'Give me a second example', 'How does this connect to the main question?', 'Show this as a diagram'], 'The chips');
           // A one-click question about what was pointed at.
@@ -1819,7 +2502,7 @@
           ok(!chipLabels(id).includes('Show me an example'), 'A question already asked is not offered again');
         }
         // A question Claude suggested.
-        const q = kind === 'main' ? NEXT[0] : 'Give me a second example';
+        const q = kind === 'main' ? NEXT[0] : K.next || 'Give me a second example';
         const leaf = lastCol().leaf, before = ids();
         await click(chip(id, q), `the chip "${q}"`);
         const next = await fresh(before);
@@ -1882,7 +2565,8 @@
         await drawn();
         eq(n.phase, 'done', 'The turn');
         same($$('strong', answerText(next)).map(txt), ['Right:', 'Off or missing:', 'Check yourself:'], 'The three parts of the check');
-        eq(lastCall().prompt, node(next).prompt, 'The question sent');
+        if (KINDS[kind].sent) ok(lastCall().prompt.startsWith(node(next).prompt + '\n\n' + NOTE_HEAD), 'The question sent, with the sheet');
+        else eq(lastCall().prompt, node(next).prompt, 'The question sent');
         eq(lastCall().turns.length, kind === 'main' ? 4 : 6, 'The turns sent');
         same([lastCol().start, lastCol().leaf], [id, next], 'The column');
         ok(chipLabels(id).includes('What did I leave out?'), 'The questions Claude suggests after the check are offered');
@@ -1924,12 +2608,16 @@
         has(call.prompt, `what I should take away from the side thread about "${KINDS[kind].about}"`, 'The request names what the thread was about');
         eq(call.tier, 'quick', 'The takeaway is asked of the fast model');
         const mark = () => KINDS[kind].mark(id);
-        await until(() => mark().classList.contains('resolved') && !mark().classList.contains('active'), 'what was pointed at to show as resolved');
+        const sent = KINDS[kind].sent;
+        if (!sent) await until(() => mark().classList.contains('resolved') && !mark().classList.contains('active'), 'what was pointed at to show as resolved');
         eq(txt($('#counts')), '0 open · 0 queued · 1 resolved', 'The map counts');
         await until(() => txt($('#tree .row.resolved .take')) === n.takeaway, 'the takeaway to show in the map');
         ok($('#next').hidden, 'A resolved thread is not an open question');
-        // Pointing at it again opens the folded thread, with no menu.
-        await click(kind === 'symbol' ? await symbol(() => display(mainText()), '\\alpha') : mark(), 'what was pointed at', KINDS[kind].accept);
+        // Pointing at it again opens the folded thread, with no menu. A thread
+        // on a sent answer's question has no mark of its own: the way back is
+        // the menu of the question, or the button of the check.
+        if (sent) await KINDS[kind].reopen();
+        else await click(kind === 'symbol' ? await symbol(() => display(mainText()), '\\alpha') : mark(), 'what was pointed at', KINDS[kind].accept);
         await until(() => pane(id), 'the thread to open again');
         ok(!pop(), 'No menu');
         has(txt($('.banner', pane(id))), '✓ Resolved', 'The banner');
@@ -1938,7 +2626,7 @@
         await click(button($('.banner', pane(id)), 'Reopen'), '"Reopen"');
         await until(() => pane(id) && !$('.banner', pane(id)) && button(pane(id), 'Got it'), 'the thread to be open again');
         eq(node(id).status, 'open', 'The thread');
-        ok(mark().classList.contains('open'), 'What was pointed at shows as open again');
+        if (!sent) ok(mark().classList.contains('open'), 'What was pointed at shows as open again');
         return null;
       },
     },
@@ -1951,10 +2639,22 @@
         await click($('#writeup'), '"Write it up"');
         const sheet = await until(() => $('#modal.show .sheet'), 'the write-up');
         await drawn();
-        eq(txt($('h1', sheet)), FIRST, 'The title');
-        has(txt(sheet), 'Placeholder answer, written by the local stand-in', 'The first answer');
+        const K = KINDS[kind];
+        const title = K.sent ? QDOC.question : FIRST;
+        eq(txt($('h1', sheet)), title, 'The title');
+        has(txt(sheet), K.sent ? 'I can. Three things change what I write.' : 'Placeholder answer, written by the local stand-in', 'The first answer');
         const side = $$('.dbranch', sheet);
-        if (kind === 'main') {
+        if (K.sent) {
+          eq(side.length, 1, 'Side threads');
+          eq(txt($('.danchor', side[0])), K.head, 'What the thread is about');
+          eq(txt($('.dq', side[0])), K.dq, 'The question');
+          has(txt(side[0]), K.reply, 'The answer in the thread');
+          // Under the paragraph that asks the question; the check, which hangs
+          // on no passage, comes after the whole answer.
+          has(txt(side[0].previousElementSibling), K.above, 'What is above the thread');
+          eq($$('ul.open li', sheet).length, 1, 'Listed as still open');
+          has(txt($('ul.open li', sheet)), K.dq, 'Listed as still open');
+        } else if (kind === 'main') {
           eq(side.length, 0, 'Side threads');
           ok(!$('ul.open', sheet), 'Nothing is listed as still open');
         } else {
@@ -1974,11 +2674,13 @@
         }
         await click(button(sheet, 'Copy as Markdown'), '"Copy as Markdown"');
         const md = await until(() => grab.text, 'the Markdown');
-        ok(md.startsWith(`# ${FIRST}\n\n`), 'The Markdown starts with the question');
-        has(md, '```mermaid\nflowchart TD', 'The diagram becomes Mermaid');
-        has(md, '\n' + FORMULA + '\n', 'The formula stays LaTeX');
+        ok(md.startsWith(`# ${title}\n\n`), 'The Markdown starts with the question');
+        if (!K.sent) {
+          has(md, '```mermaid\nflowchart TD', 'The diagram becomes Mermaid');
+          has(md, '\n' + FORMULA + '\n', 'The formula stays LaTeX');
+        }
         lacks(md, '```graph', 'The Markdown');
-        if (kind !== 'main') has(md, `> On “${KINDS[kind].about}”: **Explain further**\n>\n> ${SIDE_REPLY}`, 'The side thread in the Markdown');
+        if (kind !== 'main') has(md, `> On “${K.about}”: **${K.dq || 'Explain further'}**\n>\n> ${K.reply || SIDE_REPLY}`, 'The side thread in the Markdown');
         await click(button(sheet, 'Close'), '"Close"');
         ok(!$('#modal.show') && pane(id), 'The write-up closes and the thread is still there');
       },
@@ -1992,8 +2694,9 @@
       if (kind === 'main') { same(c.cols, [{ start: 'root', leaf: 'root' }], 'The columns'); return; }
       const n = c.nodes[c.cols[1].start];
       same([c.cols.length, n.parent, n.phase, n.status], [2, 'root', 'done', 'open'], 'The thread');
-      same([!!n.anchor.math, n.anchor.sym || null, n.anchor.part || null], {
-        passage: [false, null, null], formula: [true, null, null], symbol: [true, '\\alpha', null], part: [false, null, 'n:question'],
+      same([!!n.anchor.math, n.anchor.sym || null, n.anchor.part || null, n.anchor.ask || null, !!n.anchor.check], {
+        passage: [false, null, null, null, false], formula: [true, null, null, null, false], symbol: [true, '\\alpha', null, null, false], part: [false, null, 'n:question', null, false],
+        question: [false, null, null, 'q1', false], check: [false, null, null, null, true],
       }[kind], 'What the thread is attached to');
     });
   }

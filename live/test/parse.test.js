@@ -534,6 +534,16 @@ test('prompts: each kind of pointing names what was pointed at', () => {
   assert.match(LLM.followPrompt('a sentence.', 'why'), /^Still about the part I pointed at \("a sentence\."\): Why is this true\?/);
 });
 
+// A question the reader was asked stands above the first reply of its thread,
+// and Claude here did not write it.
+test('prompts: a part of a question the reader was asked is not called a part of the answer', () => {
+  assert.match(LLM.passagePrompt('a sentence.', 'explain', true), /^About this part of the question you asked me:\n"a sentence\."\n\nExplain this part further/);
+  assert.equal(LLM.askPrompt('a sentence.', 'Why?', true), 'About this part of the question you asked me:\n"a sentence."\n\nWhy?');
+  assert.equal(LLM.formulaPrompt('$$L = 1$$', 'Why 1?', true), 'About this formula in the question you asked me: $$L = 1$$\n\nWhy 1?');
+  assert.match(LLM.symbolPrompt('\\alpha', '$$L = \\alpha$$', '', true), /^About the symbol \$\\alpha\$ in this formula from the question you asked me: /);
+  assert.match(LLM.termPrompt('logits', true), /^About this term in the question you asked me: "logits"/);
+});
+
 // The page words a button's question in English. Claude would take that for
 // the person's language, so each one says at its end that the app wrote it.
 test('prompts: a question the app worded says so, and a typed one does not', () => {

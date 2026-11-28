@@ -1,6 +1,6 @@
 # Testing
 
-Six layers. The first five need nothing installed.
+Seven layers. The first six need nothing installed.
 
 | Layer | What it checks | How to run it |
 | --- | --- | --- |
@@ -8,6 +8,7 @@ Six layers. The first five need nothing installed.
 | Notion tests | How a Notion page is handed to Claude: a long one in parts, what one answer may read, what travels to the next question | `npm test` |
 | Web tests | How the web is searched and read for Claude, which addresses may be read, and what happens when a connector is not there | `npm test` |
 | Inbox tests | How an answer sent to the page from another chat is read, and when the page hears of one | `npm test` |
+| Sheet tests | The questions a sent answer asks: the sender's list, where a question is found in the text, what Claude is told of the answers, a proposed answer, the reply | `npm test` |
 | Static check | A name that hides an outer name, a name used before it is defined | `npm test` (needs an ESLint, see below) |
 | Flow tests | The real page, clicked through against the stand-in for Claude | open `/test` in the Browser pane |
 
@@ -23,7 +24,8 @@ npm test
 ```
 
 This is `node live/test/run.js`. It runs the parsing tests, the Notion tests,
-the web tests, the inbox tests, then the static check, and prints a summary.
+the web tests, the inbox tests, the sheet tests, then the static check, and
+prints a summary.
 It exits with an error if any fails.
 
 ## Parsing tests
@@ -81,6 +83,21 @@ tells Claude where they came from, the title), and which documents are not a
 conversation. Against a stand-in store it checks that the page listens to the
 collection `inbox`, that a visitor to someone else's copy is not offered it,
 and that a page published without the store has none.
+
+## Sheet tests
+
+```bash
+node --test live/test/sheet.test.js
+```
+
+`live/test/sheet.test.js` covers the questions an answer sent to the page
+asks its reader. It checks that `LLM.fromInbox` reads the sender's list,
+that `findQuote` (lifted from `app.js`) finds a question in the drawn text
+when the sender's quote still has its Markdown, what `LLM.sheetNote` tells
+Claude and that it goes with the turn being asked and no other, that
+`rules()` allows a proposed answer in every thread of such a conversation,
+that `LLM.parse` reads proposals only under the `@@@` and by the number of
+their question, and the wording of the copied reply.
 
 ## Static check
 
@@ -178,13 +195,19 @@ with `?only=`.
 A bug shipped because "Check" was only ever tried in the main thread. So each
 action that every thread offers is run once in each kind of thread:
 
-| | Main thread | Passage | Formula | Symbol | Diagram part |
-| --- | --- | --- | --- | --- | --- |
-| Typed message | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Follow-up chips | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Check (Explain it back) | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Got it, and Reopen | not offered | ✓ | ✓ | ✓ | ✓ |
-| Write-up | ✓ | ✓ | ✓ | ✓ | ✓ |
+| | Main thread | Passage | Formula | Symbol | Diagram part | Question thread | Check thread |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Typed message | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Follow-up chips | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Check (Explain it back) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Got it, and Reopen | not offered | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Write-up | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+The last two kinds hang from an answer that was sent to the page with
+questions: the thread of one question, and the check of the reader's
+answers. They start from a different conversation, so their entries in
+`KINDS` say what differs: what the thread opens with, its chips, and how it
+is found again once folded, since it has no mark of its own in the text.
 
 The main thread has no "Got it"; its cell checks that the button is absent.
 The "Check" cell writes an explanation in the message box, sends it, and then
@@ -201,6 +224,7 @@ end of the grid section then runs every pair.
     live/test/notion.test.js  the Notion tests
     live/test/web.test.js     the web tests
     live/test/inbox.test.js   the inbox tests
+    live/test/sheet.test.js   the sheet tests
     live/test/extract.js      gets the app's pure functions into Node
     live/test/eslintrc.json   the two rules of the static check
     live/test/run.js          the one command (npm test)
